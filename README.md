@@ -5,7 +5,7 @@ Screenshot-triggered bug reporting for iOS apps. When your users take a screensh
 - Website: [bugscreen.app](https://bugscreen.app)
 - Documentation: [bugscreen.app/docs/ios](https://bugscreen.app/docs/ios)
 
-This repository is a read-only mirror of the iOS SDK source, published on each release. Issues and pull requests are accepted here.
+This repository is a read-only mirror of the iOS SDK source, published on each release. Issues are accepted here.
 
 ## Requirements
 
