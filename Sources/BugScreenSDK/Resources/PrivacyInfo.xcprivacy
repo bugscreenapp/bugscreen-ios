@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  BugScreen SDK Privacy Manifest
+
+  This privacy manifest declares the SDK's data collection and API usage practices
+  for App Store submission. Required for iOS 17+ apps.
+
+  Key Points:
+  - SDK does NOT collect data automatically
+  - Data is only collected when the user explicitly submits a bug report
+  - All collected data is used solely for app functionality (issue triage)
+  - No tracking, no linking to identity, no third-party data sharing
+  - Uses system boot time API for log timestamps
+-->
+<plist version="1.0">
+<dict>
+	<!-- API Usage -->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- System Boot Time API -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- 35F9.1: Measure time or duration -->
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Data Collection -->
+	<!--
+	  All entries describe data sent only when the user explicitly submits a bug
+	  report. Every type is collected for app functionality (issue triage), is
+	  not linked to the user's identity, and is not used for tracking.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<!-- Device model identifier (e.g. iPhone15,2) — from MetadataCollector -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectionPurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- OS version, app version, memory, locale, SDK version, in-memory log buffer -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectionPurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- User-attached screenshot (only on explicit submit) -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectionPurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- Free-text bug description authored by the user -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectionPurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Tracking -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<!-- Tracking Domains -->
+	<key>NSPrivacyTrackingDomains</key>
+	<array>
+		<!-- No tracking domains -->
+	</array>
+</dict>
+</plist>
