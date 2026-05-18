@@ -8,7 +8,7 @@ import os.log
 /// reports to provide debugging context.
 ///
 /// All methods are thread-safe and can be called from any queue.
-internal class Logger {
+internal final class Logger: @unchecked Sendable {
 
     // MARK: - Properties
 
@@ -35,13 +35,19 @@ internal class Logger {
         let level: LogLevel
         let message: String
 
+        // en_US_POSIX pins digit shaping so non-Latin device locales still emit ASCII digits.
+        private static let formatter: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+            f.locale = Locale(identifier: "en_US_POSIX")
+            return f
+        }()
+
         /// Returns the formatted log entry string.
         ///
         /// Format: "YYYY-MM-DD HH:mm:ss.SSS [LEVEL] message"
         var formatted: String {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-            return "\(formatter.string(from: timestamp)) [\(level.displayName)] \(message)"
+            "\(Self.formatter.string(from: timestamp)) [\(level.displayName)] \(message)"
         }
 
         /// Returns the byte size of the formatted entry.

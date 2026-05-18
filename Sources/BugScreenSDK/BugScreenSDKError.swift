@@ -1,9 +1,12 @@
 import Foundation
 
-/// Errors that can occur when using the BugScreen SDK.
-public enum BugScreenSDKError: LocalizedError {
+/// Errors that can occur internally inside the BugScreen SDK.
+internal enum BugScreenSDKError: LocalizedError, Sendable {
     /// SDK has not been configured. Call `BugScreenSDK.configure()` first.
     case notConfigured
+
+    /// Caller-side validation failed (e.g. a method argument was out of range).
+    case invalidArgument(String)
 
     /// The provided URL is invalid
     case invalidURL
@@ -17,17 +20,26 @@ public enum BugScreenSDKError: LocalizedError {
     /// API error with custom message from server
     case apiError(String)
 
+    /// The request was cancelled before it completed.
+    case cancelled
+
+    /// The request did not complete within the configured timeout.
+    case timeout
+
     /// Network error with underlying system error
-    case networkError(Error)
+    case networkError(any Error & Sendable)
 
     /// Failed to encode request data
     case encodingError
 
     /// Human-readable error description
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .notConfigured:
             return "BugScreenSDK not configured. Call BugScreenSDK.configure() before using the SDK."
+
+        case .invalidArgument(let message):
+            return "Invalid argument: \(message)"
 
         case .invalidURL:
             return "Invalid API URL. Please check your configuration."
@@ -39,7 +51,13 @@ public enum BugScreenSDKError: LocalizedError {
             return "HTTP error: \(code). \(Self.httpErrorMessage(for: code))"
 
         case .apiError(let message):
-            return message
+            return "API error: \(message)"
+
+        case .cancelled:
+            return "Request cancelled."
+
+        case .timeout:
+            return "Request timed out. Please try again."
 
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"

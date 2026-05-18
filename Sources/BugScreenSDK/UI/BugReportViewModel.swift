@@ -6,7 +6,7 @@ import Combine
 ///
 /// Manages form state, validation, and submission logic for the bug report screen.
 @MainActor
-internal class BugReportViewModel: ObservableObject {
+internal final class BugReportViewModel: ObservableObject {
 
     // MARK: - Published Properties
 

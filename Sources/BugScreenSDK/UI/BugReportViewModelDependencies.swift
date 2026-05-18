@@ -5,6 +5,7 @@ import UIKit
 /// internal `APIClient`; tests provide a fake so the view model can be
 /// exercised without configuring the SDK.
 internal protocol BugReportSubmitting {
+    @MainActor
     func submitBugReport(
         description: String,
         screenshot: UIImage?
@@ -35,6 +36,7 @@ internal protocol ScreenshotLocating {
 // MARK: - Production adapters
 
 internal struct DefaultBugReportSubmitter: BugReportSubmitting {
+    @MainActor
     func submitBugReport(
         description: String,
         screenshot: UIImage?
@@ -61,7 +63,6 @@ internal struct DefaultBugReportSubmitter: BugReportSubmitting {
     }
 }
 
-@available(iOS 15.0, *)
 internal struct DefaultPhotosPermissionRequester: PhotosPermissionRequesting {
     @MainActor
     func ensureAccess(
@@ -72,7 +73,6 @@ internal struct DefaultPhotosPermissionRequester: PhotosPermissionRequesting {
     }
 }
 
-@available(iOS 15.0, *)
 internal struct DefaultScreenshotLocator: ScreenshotLocating {
     func findLatestScreenshot(
         since: Date,

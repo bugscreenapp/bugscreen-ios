@@ -20,6 +20,7 @@ enum TestHelpers {
     ///
     /// Note: This is a workaround since BugScreenSDK is a singleton.
     /// In production code, you should only configure once.
+    @MainActor
     static func resetSDK() {
         BugScreenSDK.shutdown()
     }

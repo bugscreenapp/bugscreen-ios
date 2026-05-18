@@ -3,34 +3,36 @@ import UIKit
 
 /// Generic key/value metadata payload sent with a bug report.
 ///
-/// The backend accepts arbitrary keys (`additionalProperties: true`) and each
-/// platform sets the ones it cares about — no need to keep iOS and Android in
-/// lockstep on field names.
+/// Keys double as display labels rendered verbatim by the backend (GitHub
+/// markdown body, Jira ADF). Units are baked into the key where ambiguity is
+/// possible (`Screen Width (points)` vs `Screen Width (pixels)`).
 internal typealias BugReportMetadata = [String: Any]
 
-/// Wire keys for the metadata payload. Must match the Android SDK where the field is shared.
+/// Wire keys for the metadata payload. Keys are human-readable display labels.
 internal enum MetadataKeys {
-    static let device = "device"
-    static let manufacturer = "manufacturer"
-    static let model = "model"
-    static let osVersion = "osVersion"
-    static let appVersion = "appVersion"
-    static let appBuildNumber = "appBuildNumber"
-    static let bundleIdentifier = "bundleIdentifier"
-    static let screenResolution = "screenResolution"
-    static let screenScale = "screenScale"
-    static let screenWidth = "screenWidth"
-    static let screenHeight = "screenHeight"
-    static let totalMemory = "totalMemory"
-    static let availableMemory = "availableMemory"
-    static let locale = "locale"
-    static let customData = "customData"
+    static let device = "Device"
+    static let manufacturer = "Manufacturer"
+    static let model = "Model"
+    static let osVersion = "OS Version"
+    static let appVersion = "App Version"
+    static let appBuildNumber = "App Build Number"
+    static let bundleIdentifier = "Bundle Identifier"
+    static let screenWidthPoints = "Screen Width (points)"
+    static let screenHeightPoints = "Screen Height (points)"
+    static let screenWidthPixels = "Screen Width (pixels)"
+    static let screenHeightPixels = "Screen Height (pixels)"
+    static let screenScale = "Screen Scale"
+    static let totalMemory = "Total Memory"
+    static let availableMemory = "Available Memory"
+    static let locale = "Locale"
+    static let customData = "Custom Data"
 }
 
 internal enum MetadataCollector {
 
     static func collect(customData: [String: String]? = nil) -> BugReportMetadata {
         let bounds = UIScreen.main.bounds
+        let nativeBounds = UIScreen.main.nativeBounds
         let model = deviceModel()
         var metadata: BugReportMetadata = [
             MetadataKeys.device: "Apple \(model)",
@@ -40,12 +42,13 @@ internal enum MetadataCollector {
             MetadataKeys.appVersion: appVersion(),
             MetadataKeys.appBuildNumber: buildNumber(),
             MetadataKeys.bundleIdentifier: Bundle.main.bundleIdentifier ?? "unknown",
-            MetadataKeys.screenResolution: screenResolution(),
+            MetadataKeys.screenWidthPoints: Int(bounds.width),
+            MetadataKeys.screenHeightPoints: Int(bounds.height),
+            MetadataKeys.screenWidthPixels: Int(nativeBounds.width),
+            MetadataKeys.screenHeightPixels: Int(nativeBounds.height),
             MetadataKeys.screenScale: "\(UIScreen.main.scale)x",
-            MetadataKeys.screenWidth: Int(bounds.width),
-            MetadataKeys.screenHeight: Int(bounds.height),
-            MetadataKeys.totalMemory: ProcessInfo.processInfo.physicalMemory,
-            MetadataKeys.availableMemory: availableMemory(),
+            MetadataKeys.totalMemory: formatBytes(ProcessInfo.processInfo.physicalMemory),
+            MetadataKeys.availableMemory: formatBytes(availableMemory()),
             MetadataKeys.locale: Locale.current.identifier
         ]
         if let customData = customData {
@@ -81,13 +84,6 @@ internal enum MetadataCollector {
         return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
     }
 
-    // MARK: - Display Information
-
-    private static func screenResolution() -> String {
-        let bounds = UIScreen.main.nativeBounds
-        return "\(Int(bounds.width)) x \(Int(bounds.height))"
-    }
-
     // MARK: - System Information
 
     private static func availableMemory() -> UInt64 {
@@ -112,5 +108,15 @@ internal enum MetadataCollector {
         }
 
         return 0
+    }
+
+    private static func formatBytes(_ bytes: UInt64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024.0
+        if kb < 1024 { return String(format: "%.2f KB", kb) }
+        let mb = kb / 1024.0
+        if mb < 1024 { return String(format: "%.2f MB", mb) }
+        let gb = mb / 1024.0
+        return String(format: "%.2f GB", gb)
     }
 }

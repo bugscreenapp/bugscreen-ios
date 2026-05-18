@@ -37,7 +37,7 @@ final class LoggerTests: XCTestCase {
         logger.log("Verbose", level: .verbose)
         logger.log("Debug", level: .debug)
         logger.log("Info", level: .info)
-        logger.log("Warn", level: .warn)
+        logger.log("Warn", level: .warning)
         logger.log("Error", level: .error)
 
         XCTAssertEqual(logger.entryCount(), 5, "Should have 5 log entries")

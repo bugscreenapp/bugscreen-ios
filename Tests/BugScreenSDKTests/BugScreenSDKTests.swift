@@ -2,6 +2,7 @@ import XCTest
 @testable import BugScreenSDK
 
 /// Tests for BugScreenSDK configuration and initialization.
+@MainActor
 final class BugScreenSDKTests: XCTestCase {
 
     override func setUp() {
@@ -60,7 +61,7 @@ final class BugScreenSDKTests: XCTestCase {
         BugScreenSDK.configure(
             apiKey: TestHelpers.validAPIKey,
             enableScreenshotDetection: false,
-            enableLogging: true
+            debug: true
         )
 
         XCTAssertTrue(BugScreenSDK.isConfigured, "SDK should be configured with custom options")
@@ -94,7 +95,7 @@ final class BugScreenSDKTests: XCTestCase {
         BugScreenSDK.log("Verbose", level: .verbose)
         BugScreenSDK.log("Debug", level: .debug)
         BugScreenSDK.log("Info", level: .info)
-        BugScreenSDK.log("Warn", level: .warn)
+        BugScreenSDK.log("Warn", level: .warning)
         BugScreenSDK.log("Error", level: .error)
 
         // Should not crash
@@ -128,35 +129,4 @@ final class BugScreenSDKTests: XCTestCase {
         XCTAssertTrue(BugScreenSDK.isConfigured, "SDK should allow reconfiguration after shutdown")
     }
 
-    // MARK: - Thread Safety Tests
-
-    func testConcurrentConfiguration() {
-        let expectation = self.expectation(description: "Concurrent configuration")
-        expectation.expectedFulfillmentCount = 10
-
-        DispatchQueue.concurrentPerform(iterations: 10) { _ in
-            BugScreenSDK.configure(apiKey: TestHelpers.validAPIKey)
-            expectation.fulfill()
-        }
-
-        waitForExpectations(timeout: 5)
-
-        XCTAssertTrue(BugScreenSDK.isConfigured, "SDK should handle concurrent configure calls")
-    }
-
-    func testConcurrentLogging() {
-        BugScreenSDK.configure(apiKey: TestHelpers.validAPIKey)
-
-        let expectation = self.expectation(description: "Concurrent logging")
-        expectation.expectedFulfillmentCount = 100
-
-        DispatchQueue.concurrentPerform(iterations: 100) { index in
-            BugScreenSDK.log("Message \(index)", level: .info)
-            expectation.fulfill()
-        }
-
-        waitForExpectations(timeout: 5)
-
-        XCTAssertTrue(BugScreenSDK.isConfigured)
-    }
 }

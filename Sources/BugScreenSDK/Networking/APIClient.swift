@@ -5,7 +5,7 @@ import UIKit
 ///
 /// Handles multipart form-data uploads, authentication, and error handling.
 /// All methods are async and throw errors for proper error propagation.
-internal class APIClient {
+internal final class APIClient {
 
     // MARK: - Properties
 
@@ -71,7 +71,7 @@ internal class APIClient {
     ///     screenshot: someUIImage,
     ///     logFile: logFileURL
     /// )
-    /// print(response.issueUrls) // ["https://github.com/..."]
+    /// print(response.issueURLs) // ["https://github.com/..."]
     /// ```
     func submitBugReport(
         description: String,
@@ -81,7 +81,7 @@ internal class APIClient {
     ) async throws -> BugReportResponse {
         // Validate description length
         guard !description.isEmpty && description.count <= 10000 else {
-            throw BugScreenSDKError.apiError("Description must be between 1 and 10000 characters")
+            throw BugScreenSDKError.invalidArgument("Description must be between 1 and 10000 characters")
         }
 
         // Construct url
@@ -111,8 +111,23 @@ internal class APIClient {
         )
         request.httpBody = body
 
-        // Perform request
-        let (data, response) = try await session.data(for: request)
+        // Perform request. Map well-known URLError codes to typed SDK cases so
+        // callers can switch on `.cancelled` / `.timeout` without inspecting
+        // the underlying error.
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let urlError as URLError {
+            switch urlError.code {
+            case .cancelled:
+                throw BugScreenSDKError.cancelled
+            case .timedOut:
+                throw BugScreenSDKError.timeout
+            default:
+                throw BugScreenSDKError.networkError(urlError)
+            }
+        }
 
         // Validate HTTP response
         guard let httpResponse = response as? HTTPURLResponse else {

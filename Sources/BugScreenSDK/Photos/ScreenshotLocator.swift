@@ -2,10 +2,9 @@ import UIKit
 import Photos
 import OSLog
 
-@available(iOS 15.0, *)
 internal enum ScreenshotLocator {
 
-    private static let logger = OSLog(subsystem: "com.bugscreen.sdk", category: "ScreenshotLocator")
+    private static let logger = OSLog(subsystem: "app.bugscreen.sdk", category: "ScreenshotLocator")
 
     static func findLatestScreenshot(
         since: Date,

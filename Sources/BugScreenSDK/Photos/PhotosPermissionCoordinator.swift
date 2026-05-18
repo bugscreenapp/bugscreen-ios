@@ -2,11 +2,10 @@ import UIKit
 import Photos
 import OSLog
 
-@available(iOS 15.0, *)
 @MainActor
 internal enum PhotosPermissionCoordinator {
 
-    private static let logger = OSLog(subsystem: "com.bugscreen.sdk", category: "PhotosPermission")
+    private static let logger = OSLog(subsystem: "app.bugscreen.sdk", category: "PhotosPermission")
 
     /// Result of the permission flow.
     enum Outcome {

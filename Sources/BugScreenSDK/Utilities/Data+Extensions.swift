@@ -20,7 +20,7 @@ extension Data {
     /// body.append("Content-Disposition: form-data; name=\"field\"\r\n\r\n")
     /// body.append("value\r\n")
     /// ```
-    mutating func append(_ string: String) {
+    internal mutating func append(_ string: String) {
         if let data = string.data(using: .utf8) {
             append(data)
         }

@@ -80,14 +80,6 @@ final class MetadataCollectorTests: XCTestCase {
 
     // MARK: - Display Information Tests
 
-    func testScreenResolutionFormat() {
-        let metadata = MetadataCollector.collect()
-
-        let screenResolution = metadata[MetadataKeys.screenResolution] as? String
-        XCTAssertNotNil(screenResolution)
-        XCTAssertTrue(screenResolution!.contains(" x "))
-    }
-
     func testScreenScaleFormat() {
         let metadata = MetadataCollector.collect()
 
@@ -100,33 +92,36 @@ final class MetadataCollectorTests: XCTestCase {
     func testScreenDimensionsPositive() {
         let metadata = MetadataCollector.collect()
 
-        let width = metadata[MetadataKeys.screenWidth] as? Int
-        let height = metadata[MetadataKeys.screenHeight] as? Int
-        XCTAssertNotNil(width)
-        XCTAssertNotNil(height)
-        XCTAssertGreaterThan(width!, 0)
-        XCTAssertGreaterThan(height!, 0)
+        let widthPoints = metadata[MetadataKeys.screenWidthPoints] as? Int
+        let heightPoints = metadata[MetadataKeys.screenHeightPoints] as? Int
+        let widthPixels = metadata[MetadataKeys.screenWidthPixels] as? Int
+        let heightPixels = metadata[MetadataKeys.screenHeightPixels] as? Int
+        XCTAssertNotNil(widthPoints)
+        XCTAssertNotNil(heightPoints)
+        XCTAssertNotNil(widthPixels)
+        XCTAssertNotNil(heightPixels)
+        XCTAssertGreaterThan(widthPoints!, 0)
+        XCTAssertGreaterThan(heightPoints!, 0)
+        XCTAssertGreaterThanOrEqual(widthPixels!, widthPoints!)
+        XCTAssertGreaterThanOrEqual(heightPixels!, heightPoints!)
     }
 
     // MARK: - System Information Tests
 
-    func testTotalMemoryGreaterThanZero() {
+    func testTotalMemoryFormatted() {
         let metadata = MetadataCollector.collect()
 
-        let totalMemory = metadata[MetadataKeys.totalMemory] as? UInt64
+        let totalMemory = metadata[MetadataKeys.totalMemory] as? String
         XCTAssertNotNil(totalMemory)
-        XCTAssertGreaterThan(totalMemory!, 0)
+        XCTAssertFalse(totalMemory!.isEmpty)
     }
 
-    func testAvailableMemoryReasonable() {
+    func testAvailableMemoryFormatted() {
         let metadata = MetadataCollector.collect()
 
-        guard let available = metadata[MetadataKeys.availableMemory] as? UInt64,
-              let total = metadata[MetadataKeys.totalMemory] as? UInt64 else {
-            return XCTFail("memory fields missing")
-        }
-        XCTAssertLessThanOrEqual(available, total)
-        XCTAssertGreaterThan(available, 0)
+        let available = metadata[MetadataKeys.availableMemory] as? String
+        XCTAssertNotNil(available)
+        XCTAssertFalse(available!.isEmpty)
     }
 
     func testLocaleNotEmpty() {
@@ -145,7 +140,9 @@ final class MetadataCollectorTests: XCTestCase {
         let expected: Set<String> = [
             MetadataKeys.device, MetadataKeys.manufacturer, MetadataKeys.model, MetadataKeys.osVersion,
             MetadataKeys.appVersion, MetadataKeys.appBuildNumber, MetadataKeys.bundleIdentifier,
-            MetadataKeys.screenResolution, MetadataKeys.screenScale, MetadataKeys.screenWidth, MetadataKeys.screenHeight,
+            MetadataKeys.screenWidthPoints, MetadataKeys.screenHeightPoints,
+            MetadataKeys.screenWidthPixels, MetadataKeys.screenHeightPixels,
+            MetadataKeys.screenScale,
             MetadataKeys.totalMemory, MetadataKeys.availableMemory, MetadataKeys.locale
         ]
         XCTAssertTrue(expected.isSubset(of: Set(metadata.keys)))
@@ -155,6 +152,7 @@ final class MetadataCollectorTests: XCTestCase {
         // Android does not send an SDK version field; iOS now matches.
         let metadata = MetadataCollector.collect()
         XCTAssertNil(metadata["bugscreenVersion"])
+        XCTAssertNil(metadata["BugScreen SDK"])
     }
 
     // MARK: - Custom Data Tests

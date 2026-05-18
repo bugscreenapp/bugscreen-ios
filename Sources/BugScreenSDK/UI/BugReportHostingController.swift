@@ -6,7 +6,6 @@ import SwiftUI
 /// Wraps `BugReportView` in a `UIHostingController` so it can be presented
 /// from UIKit-based apps. Automatically dismisses itself when the user completes
 /// or cancels the bug report.
-@available(iOS 15.0, *)
 internal class BugReportHostingController: UIHostingController<BugReportView> {
 
     // MARK: - Initialization

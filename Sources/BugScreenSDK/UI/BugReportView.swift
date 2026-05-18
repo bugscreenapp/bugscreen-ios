@@ -6,7 +6,6 @@ import PhotosUI
 /// Displays a form with description editor, screenshot attachment, device info,
 /// and submit button. Handles loading states and success/error alerts.
 /// Uses minimal black/white design matching Android SDK.
-@available(iOS 15.0, *)
 internal struct BugReportView: View {
 
     // MARK: - Properties
@@ -234,7 +233,7 @@ internal struct BugReportView: View {
                     deviceInfoRow(label: "OS Version", key: MetadataKeys.osVersion)
                     deviceInfoRow(label: "App Version", key: MetadataKeys.appVersion)
                     deviceInfoRow(label: "Build Number", key: MetadataKeys.appBuildNumber)
-                    deviceInfoRow(label: "Screen Resolution", key: MetadataKeys.screenResolution)
+                    deviceInfoResolutionRow()
                     deviceInfoRow(label: "Locale", key: MetadataKeys.locale)
                 }
                 .font(.system(size: 12, design: .monospaced))
@@ -256,6 +255,25 @@ internal struct BugReportView: View {
                 .foregroundColor(secondaryColor)
             Spacer()
             Text(value)
+                .foregroundColor(primaryColor)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func deviceInfoResolutionRow() -> some View {
+        let width = viewModel.metadata[MetadataKeys.screenWidthPixels] as? Int
+        let height = viewModel.metadata[MetadataKeys.screenHeightPixels] as? Int
+        let display: String = {
+            if let width = width, let height = height {
+                return "\(width) x \(height) px"
+            }
+            return "—"
+        }()
+        return HStack(alignment: .top) {
+            Text("Screen Resolution:")
+                .foregroundColor(secondaryColor)
+            Spacer()
+            Text(display)
                 .foregroundColor(primaryColor)
                 .multilineTextAlignment(.trailing)
         }
@@ -328,11 +346,9 @@ internal struct BugReportView: View {
 
 // MARK: - Image Picker
 
-/// UIImagePickerController wrapper for iOS 15 compatibility.
+/// UIImagePickerController wrapper.
 ///
-/// Note: For iOS 16+, we could use PhotosPicker instead, but this provides
-/// backwards compatibility with iOS 15.
-@available(iOS 15.0, *)
+/// Note: For iOS 16+, we could use PhotosPicker instead.
 internal struct ImagePicker: UIViewControllerRepresentable {
 
     @Binding var image: UIImage?
@@ -378,7 +394,6 @@ internal struct ImagePicker: UIViewControllerRepresentable {
 
 // MARK: - Preview
 
-@available(iOS 15.0, *)
 struct BugReportView_Previews: PreviewProvider {
     static var previews: some View {
         BugReportView(onDismiss: {})
@@ -387,7 +402,7 @@ struct BugReportView_Previews: PreviewProvider {
 
 // MARK: - Color Extension
 
-extension Color {
+private extension Color {
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0

@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 internal enum SDKLog {
-    static let log = OSLog(subsystem: "com.bugscreen.sdk", category: "BugScreenSDK")
+    static let log = OSLog(subsystem: "app.bugscreen.sdk", category: "BugScreenSDK")
 
     private static let lock = NSLock()
     private static var _enabled: Bool = false

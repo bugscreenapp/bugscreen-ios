@@ -13,45 +13,35 @@ import UIKit
 /// BugScreenSDK.configure(
 ///     apiKey: "fb_your_api_key_here",
 ///     enableScreenshotDetection: true,
-///     enableLogging: false
+///     debug: false
 /// )
 ///
 /// // Anywhere in your app
 /// BugScreenSDK.log("User tapped login button", level: .info)
 /// BugScreenSDK.presentBugReport()
 /// ```
-public class BugScreenSDK {
+@MainActor
+public enum BugScreenSDK {
 
     /// The version of the BugScreen SDK. Updated by the release process.
-    public static let version: String = "0.1.0"
-
-    // MARK: - Singleton
-
-    private init() {}
-
-    // MARK: - Thread Safety
-
-    private static let queue = DispatchQueue(
-        label: "com.bugscreen.sdk",
-        attributes: .concurrent
-    )
+    internal static let version: String = "1.0.0"
 
     // MARK: - Configuration
 
-    private static var _configuration: BugScreenConfiguration?
-    private static var _logger: Logger?
-    private static var _apiClient: APIClient?
-
     /// Returns the current SDK configuration, if configured.
-    internal static var configuration: BugScreenConfiguration? {
-        queue.sync { _configuration }
-    }
+    internal private(set) static var configuration: BugScreenConfiguration?
+
+    /// Returns the internal logger instance (used by other SDK components)
+    internal private(set) static var logger: Logger?
+
+    /// Returns the internal API client (used by the bug report UI submit adapter).
+    internal private(set) static var apiClient: APIClient?
 
     /// Returns whether the SDK has been configured.
     ///
     /// You must call `configure()` before using other SDK methods.
     public static var isConfigured: Bool {
-        queue.sync { _configuration != nil }
+        configuration != nil
     }
 
     // MARK: - Public API
@@ -64,7 +54,7 @@ public class BugScreenSDK {
     /// - Parameters:
     ///   - apiKey: Your API key from the BugScreen console (must start with "fb_")
     ///   - enableScreenshotDetection: Whether to auto-detect screenshots (default: true)
-    ///   - enableLogging: Whether to output logs to Xcode console (default: false)
+    ///   - debug: Whether to enable debug behavior (default: false)
     ///
     /// - Note: If the SDK is already configured, the existing configuration is torn down
     ///   and replaced — matching Android's `start()` semantics. Useful for tests and key rotation.
@@ -74,54 +64,41 @@ public class BugScreenSDK {
     /// BugScreenSDK.configure(
     ///     apiKey: "fb_your_api_key_here",
     ///     enableScreenshotDetection: true,
-    ///     enableLogging: false
+    ///     debug: false
     /// )
     /// ```
     public static func configure(
         apiKey: String,
         enableScreenshotDetection: Bool = true,
-        enableLogging: Bool = false
+        debug: Bool = false
     ) {
-        queue.async(flags: .barrier) {
-            // Tear down any existing configuration so a second configure() acts as
-            // a reinit (matches Android's start() semantics).
-            if _configuration != nil {
-                SDKLog.internalLog("♻️ BugScreenSDK: Reconfiguring (previous configuration torn down)", type: .info)
-                tearDownLocked()
-            }
-
-            SDKLog.setEnabled(enableLogging)
-
-            // Validate API key format (warnings only, not enforced)
-            validateAPIKey(apiKey)
-
-            // Store configuration
-            _configuration = BugScreenConfiguration(
-                apiKey: apiKey,
-                enableScreenshotDetection: enableScreenshotDetection,
-                enableLogging: enableLogging
-            )
-
-            // Initialize logger
-            _logger = Logger(enableConsoleLogging: enableLogging)
-
-            // Initialize API client
-            _apiClient = APIClient(apiKey: apiKey)
-
-            // Initialize screenshot observer (Phase 4)
-            if enableScreenshotDetection {
-                if #available(iOS 15.0, *) {
-                    ScreenshotObserver.shared.startObserving()
-                } else {
-                    SDKLog.internalLog("⚠️ BugScreenSDK: Screenshot detection requires iOS 15+")
-                }
-            }
-
-            SDKLog.internalLog(
-                "✅ BugScreenSDK: Configured successfully (screenshot detection: \(enableScreenshotDetection ? "enabled" : "disabled"))",
-                type: .info
-            )
+        if configuration != nil {
+            SDKLog.internalLog("♻️ BugScreenSDK: Reconfiguring (previous configuration torn down)", type: .info)
+            tearDown()
         }
+
+        SDKLog.setEnabled(debug)
+
+        validateAPIKey(apiKey)
+
+        configuration = BugScreenConfiguration(
+            apiKey: apiKey,
+            enableScreenshotDetection: enableScreenshotDetection,
+            debug: debug
+        )
+
+        logger = Logger(enableConsoleLogging: debug)
+
+        apiClient = APIClient(apiKey: apiKey)
+
+        if enableScreenshotDetection {
+            ScreenshotObserver.shared.startObserving()
+        }
+
+        SDKLog.internalLog(
+            "✅ BugScreenSDK: Configured successfully (screenshot detection: \(enableScreenshotDetection ? "enabled" : "disabled"))",
+            type: .info
+        )
     }
 
     /// Logs a message to the SDK's circular buffer.
@@ -141,13 +118,17 @@ public class BugScreenSDK {
     /// BugScreenSDK.log("Cache size: 1024 bytes", level: .debug)
     /// ```
     public static func log(_ message: String, level: LogLevel = .info) {
-        guard isConfigured else {
+        guard let logger else {
             SDKLog.internalLog("⚠️ BugScreenSDK: Cannot log - SDK not configured", type: .error)
             return
         }
 
-        queue.async {
-            _logger?.log(message, level: level)
+        // Hop off the main actor so chatty callers (SwiftUI bodies, gesture
+        // streams) don't pay for the buffer write on the main thread. Logger
+        // has internal locking, so ordering across concurrent log() calls is
+        // best-effort by timestamp — fine for a debug buffer.
+        Task.detached(priority: .utility) {
+            logger.log(message, level: level)
         }
     }
 
@@ -161,24 +142,31 @@ public class BugScreenSDK {
     ///   - from: The view controller to present from (optional, will find top VC if nil)
     ///   - screenshot: Pre-attached screenshot image (optional)
     ///
-    /// - Note: This method must be called from the main thread.
+    /// Fire-and-forget: never throws. If the SDK is not configured or no presenting view
+    /// controller can be found, the call is a no-op and the failure is recorded via the
+    /// SDK's internal logger.
     ///
     /// Example:
     /// ```swift
     /// BugScreenSDK.presentBugReport()
     /// ```
-    @MainActor
     public static func presentBugReport(
         from viewController: UIViewController? = nil,
-        screenshot: UIImage? = nil,
-        autoAttach: Bool = false
+        screenshot: UIImage? = nil
+    ) {
+        presentBugReport(from: viewController, screenshot: screenshot, autoAttach: false)
+    }
+
+    internal static func presentBugReport(
+        from viewController: UIViewController?,
+        screenshot: UIImage?,
+        autoAttach: Bool
     ) {
         guard isConfigured else {
             SDKLog.internalLog("⚠️ BugScreenSDK: Cannot present bug report - SDK not configured", type: .error)
             return
         }
 
-        // Find presenting view controller
         let presenter = viewController ?? topViewController()
 
         guard let presenter = presenter else {
@@ -186,18 +174,13 @@ public class BugScreenSDK {
             return
         }
 
-        // Create and present bug report UI
-        if #available(iOS 15.0, *) {
-            let hostingController = BugReportHostingController(
-                screenshot: screenshot,
-                autoAttach: autoAttach
-            )
-            presenter.present(hostingController, animated: true)
+        let hostingController = BugReportHostingController(
+            screenshot: screenshot,
+            autoAttach: autoAttach
+        )
+        presenter.present(hostingController, animated: true)
 
-            SDKLog.internalLog("✅ BugScreenSDK: Presented bug report UI", type: .info)
-        } else {
-            SDKLog.internalLog("⚠️ BugScreenSDK: Bug report UI requires iOS 15+", type: .error)
-        }
+        SDKLog.internalLog("✅ BugScreenSDK: Presented bug report UI", type: .info)
     }
 
     /// Shuts down the SDK and releases resources.
@@ -207,33 +190,17 @@ public class BugScreenSDK {
     ///
     /// - Note: You must call `configure()` again before using the SDK after shutdown.
     public static func shutdown() {
-        queue.async(flags: .barrier) {
-            tearDownLocked()
-            SDKLog.internalLog("🛑 BugScreenSDK: Shutdown complete", type: .info)
-            SDKLog.setEnabled(false)
-        }
+        tearDown()
+        SDKLog.internalLog("🛑 BugScreenSDK: Shutdown complete", type: .info)
+        SDKLog.setEnabled(false)
     }
 
-    /// Stops the observer and clears all SDK state. Must be called from inside
-    /// the barrier block on `queue` — does not lock itself.
-    private static func tearDownLocked() {
+    private static func tearDown() {
         ScreenshotObserver.shared.stopObserving()
-        _logger?.clear()
-        _logger = nil
-        _apiClient = nil
-        _configuration = nil
-    }
-
-    // MARK: - Internal API (for future phases)
-
-    /// Returns the internal logger instance (used by other SDK components)
-    internal static var logger: Logger? {
-        queue.sync { _logger }
-    }
-
-    /// Returns the internal API client (used by the bug report UI submit adapter).
-    internal static var apiClient: APIClient? {
-        queue.sync { _apiClient }
+        logger?.clear()
+        logger = nil
+        apiClient = nil
+        configuration = nil
     }
 
     #if DEBUG
@@ -248,16 +215,14 @@ public class BugScreenSDK {
         baseURL: URL,
         session: URLSession
     ) {
-        queue.sync(flags: .barrier) {
-            SDKLog.setEnabled(false)
-            _configuration = BugScreenConfiguration(
-                apiKey: apiKey,
-                enableScreenshotDetection: false,
-                enableLogging: false
-            )
-            _logger = Logger(enableConsoleLogging: false)
-            _apiClient = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
-        }
+        SDKLog.setEnabled(false)
+        configuration = BugScreenConfiguration(
+            apiKey: apiKey,
+            enableScreenshotDetection: false,
+            debug: false
+        )
+        logger = Logger(enableConsoleLogging: false)
+        apiClient = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
     }
     #endif
 
@@ -287,7 +252,6 @@ public class BugScreenSDK {
     }
 
     /// Finds the topmost view controller in the view hierarchy.
-    @MainActor
     private static func topViewController() -> UIViewController? {
         let keyWindow = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }

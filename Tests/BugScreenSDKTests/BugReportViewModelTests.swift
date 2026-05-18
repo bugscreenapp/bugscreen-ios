@@ -113,7 +113,7 @@ final class BugReportViewModelTests: XCTestCase {
         let response = BugReportResponse(
             success: true,
             message: "ok",
-            issueUrls: ["https://github.com/example/repo/issues/1"]
+            issueURLs: ["https://github.com/example/repo/issues/1"]
         )
         let submitter = FakeBugReportSubmitter(result: .success(response))
         var dismissCount = 0
@@ -142,7 +142,7 @@ final class BugReportViewModelTests: XCTestCase {
         await viewModel.submit()
 
         XCTAssertEqual(viewModel.submissionState, .error)
-        XCTAssertEqual(viewModel.errorMessage, "Backend exploded")
+        XCTAssertEqual(viewModel.errorMessage, "API error: Backend exploded")
         XCTAssertTrue(viewModel.showErrorAlert)
     }
 
@@ -207,7 +207,7 @@ private final class FakeBugReportSubmitter: BugReportSubmitting {
     private(set) var lastDescription: String?
 
     init(result: Result<BugReportResponse, Error> = .success(
-        BugReportResponse(success: true, message: "ok", issueUrls: [])
+        BugReportResponse(success: true, message: "ok", issueURLs: [])
     )) {
         self.result = result
     }

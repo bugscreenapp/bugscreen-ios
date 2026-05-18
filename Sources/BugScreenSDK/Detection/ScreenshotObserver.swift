@@ -22,7 +22,6 @@ import OSLog
 ///
 /// ## Thread Safety:
 /// All UI operations are dispatched to the main thread.
-@available(iOS 15.0, *)
 internal final class ScreenshotObserver {
 
     // MARK: - Properties
@@ -34,7 +33,7 @@ internal final class ScreenshotObserver {
     private var isObserving = false
 
     /// Logger for debugging.
-    private let logger = OSLog(subsystem: "com.bugscreen.sdk", category: "ScreenshotObserver")
+    private let logger = OSLog(subsystem: "app.bugscreen.sdk", category: "ScreenshotObserver")
 
     // MARK: - Initialization
 
@@ -210,11 +209,5 @@ internal final class ScreenshotObserver {
         }
 
         return false
-    }
-
-    // MARK: - Deinitialization
-
-    deinit {
-        stopObserving()
     }
 }

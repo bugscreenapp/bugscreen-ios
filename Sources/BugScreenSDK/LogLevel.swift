@@ -12,7 +12,7 @@ import os.log
 /// BugScreenSDK.log("Network request started", level: .debug)
 /// BugScreenSDK.log("Failed to load data", level: .error)
 /// ```
-public enum LogLevel: Int, Comparable, CaseIterable {
+public enum LogLevel: Int, Comparable, CaseIterable, Sendable {
     /// Verbose logging for very detailed debugging information
     case verbose = 0
 
@@ -23,7 +23,7 @@ public enum LogLevel: Int, Comparable, CaseIterable {
     case info = 2
 
     /// Warning logging for non-critical issues
-    case warn = 3
+    case warning = 3
 
     /// Error logging for failures and exceptions
     case error = 4
@@ -37,7 +37,7 @@ public enum LogLevel: Int, Comparable, CaseIterable {
             return "DEBUG"
         case .info:
             return "INFO"
-        case .warn:
+        case .warning:
             return "WARN"
         case .error:
             return "ERROR"
@@ -53,7 +53,7 @@ public enum LogLevel: Int, Comparable, CaseIterable {
             return .debug
         case .info:
             return .info
-        case .warn:
+        case .warning:
             return .default
         case .error:
             return .error
