@@ -16,7 +16,9 @@ final class MetadataCollectorTests: XCTestCase {
         let customData = TestHelpers.sampleCustomData
         let metadata = MetadataCollector.collect(customData: customData)
 
-        XCTAssertEqual(metadata[MetadataKeys.customData] as? [String: String], customData)
+        for (key, value) in customData {
+            XCTAssertEqual(metadata[key] as? String, value)
+        }
     }
 
     // MARK: - Device Information Tests
@@ -157,20 +159,21 @@ final class MetadataCollectorTests: XCTestCase {
 
     // MARK: - Custom Data Tests
 
-    func testNilCustomDataOmitsKey() {
+    func testNilCustomDataAddsNothing() {
+        let baseline = MetadataCollector.collect()
         let metadata = MetadataCollector.collect(customData: nil)
 
-        XCTAssertNil(metadata[MetadataKeys.customData])
+        XCTAssertEqual(Set(metadata.keys), Set(baseline.keys))
     }
 
-    func testEmptyCustomDataIsPreserved() {
+    func testEmptyCustomDataAddsNothing() {
+        let baseline = MetadataCollector.collect()
         let metadata = MetadataCollector.collect(customData: [:])
 
-        XCTAssertNotNil(metadata[MetadataKeys.customData])
-        XCTAssertEqual((metadata[MetadataKeys.customData] as? [String: String])?.isEmpty, true)
+        XCTAssertEqual(Set(metadata.keys), Set(baseline.keys))
     }
 
-    func testCustomDataPreservesValues() {
+    func testCustomDataFlattenedAlongsideStandardKeys() {
         let customData: [String: String] = [
             "key1": "value1",
             "key2": "value2",
@@ -178,7 +181,10 @@ final class MetadataCollectorTests: XCTestCase {
         ]
         let metadata = MetadataCollector.collect(customData: customData)
 
-        XCTAssertEqual(metadata[MetadataKeys.customData] as? [String: String], customData)
+        XCTAssertEqual(metadata["key1"] as? String, "value1")
+        XCTAssertEqual(metadata["key2"] as? String, "value2")
+        XCTAssertEqual(metadata["key3"] as? String, "value3")
+        XCTAssertNotNil(metadata[MetadataKeys.device])
     }
 
     // MARK: - JSON Serialization
@@ -198,9 +204,8 @@ final class MetadataCollectorTests: XCTestCase {
         XCTAssertNotNil(decoded)
         XCTAssertEqual(decoded?[MetadataKeys.device] as? String, metadata[MetadataKeys.device] as? String)
         XCTAssertEqual(decoded?[MetadataKeys.manufacturer] as? String, "Apple")
-        XCTAssertEqual(
-            decoded?[MetadataKeys.customData] as? [String: String],
-            TestHelpers.sampleCustomData
-        )
+        for (key, value) in TestHelpers.sampleCustomData {
+            XCTAssertEqual(decoded?[key] as? String, value)
+        }
     }
 }

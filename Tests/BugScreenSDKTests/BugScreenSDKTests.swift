@@ -129,4 +129,77 @@ final class BugScreenSDKTests: XCTestCase {
         XCTAssertTrue(BugScreenSDK.isConfigured, "SDK should allow reconfiguration after shutdown")
     }
 
+    // MARK: - Custom Data Tests
+
+    func testCustomDataDefaultsToEmpty() {
+        XCTAssertTrue(BugScreenSDK.customData.isEmpty)
+    }
+
+    func testSetCustomDataStoresProvidedMap() {
+        BugScreenSDK.setCustomData(["env": "staging", "buildType": "debug"])
+
+        XCTAssertEqual(BugScreenSDK.customData, ["env": "staging", "buildType": "debug"])
+    }
+
+    func testSetCustomDataReplacesNotMerges() {
+        BugScreenSDK.setCustomData(["a": "1", "b": "2"])
+        BugScreenSDK.setCustomData(["c": "3"])
+
+        XCTAssertEqual(BugScreenSDK.customData, ["c": "3"])
+    }
+
+    func testClearCustomDataEmptiesTheMap() {
+        BugScreenSDK.setCustomData(["env": "staging"])
+        BugScreenSDK.clearCustomData()
+
+        XCTAssertTrue(BugScreenSDK.customData.isEmpty)
+    }
+
+    func testShutdownClearsCustomData() {
+        BugScreenSDK.configure(apiKey: TestHelpers.validAPIKey)
+        BugScreenSDK.setCustomData(["env": "staging"])
+
+        BugScreenSDK.shutdown()
+
+        XCTAssertTrue(BugScreenSDK.customData.isEmpty)
+    }
+
+    func testSetCustomDataSingleKeyAddsToExistingMap() {
+        BugScreenSDK.setCustomData(["env": "staging"])
+        BugScreenSDK.setCustomData(key: "userId", value: "abc-123")
+
+        XCTAssertEqual(BugScreenSDK.customData, ["env": "staging", "userId": "abc-123"])
+    }
+
+    func testSetCustomDataSingleKeyOverwritesExistingValue() {
+        BugScreenSDK.setCustomData(["env": "staging"])
+        BugScreenSDK.setCustomData(key: "env", value: "production")
+
+        XCTAssertEqual(BugScreenSDK.customData, ["env": "production"])
+    }
+
+    func testRemoveCustomDataRemovesPresentKey() {
+        BugScreenSDK.setCustomData(["a": "1", "b": "2"])
+        BugScreenSDK.removeCustomData(key: "a")
+
+        XCTAssertEqual(BugScreenSDK.customData, ["b": "2"])
+    }
+
+    func testRemoveCustomDataIsNoOpForAbsentKey() {
+        BugScreenSDK.setCustomData(["a": "1"])
+        BugScreenSDK.removeCustomData(key: "missing")
+
+        XCTAssertEqual(BugScreenSDK.customData, ["a": "1"])
+    }
+
+    func testAddCustomDataMergesIntoExistingMap() {
+        BugScreenSDK.setCustomData(["env": "staging", "buildType": "debug"])
+        BugScreenSDK.addCustomData(["plan": "pro", "env": "production"])
+
+        XCTAssertEqual(
+            BugScreenSDK.customData,
+            ["env": "production", "buildType": "debug", "plan": "pro"]
+        )
+    }
+
 }

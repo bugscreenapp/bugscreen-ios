@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
 
     /// The version of the BugScreen SDK. Updated by the release process.
-    internal static let version: String = "1.0.0"
+    internal static let version: String = "1.1.0"
 
     // MARK: - Configuration
 
@@ -36,6 +36,10 @@ public enum BugScreenSDK {
 
     /// Returns the internal API client (used by the bug report UI submit adapter).
     internal private(set) static var apiClient: APIClient?
+
+    /// Custom key/value pairs attached to every subsequent bug report.
+    /// Defaults to empty; mutated only via ``setCustomData(_:)`` / ``clearCustomData()``.
+    internal private(set) static var customData: [String: String] = [:]
 
     /// Returns whether the SDK has been configured.
     ///
@@ -132,6 +136,66 @@ public enum BugScreenSDK {
         }
     }
 
+    /// Attaches a global map of custom key/value pairs to every subsequent bug report.
+    ///
+    /// Replaces (not merges) any previously set custom data — pass the full map you want
+    /// included. Swift dictionaries are value types, so the stored copy is independent of
+    /// the caller's value.
+    ///
+    /// Must be called from the main actor (same as other SDK entry points). Reads happen
+    /// when the bug report screen is opened.
+    ///
+    /// Example:
+    /// ```swift
+    /// BugScreenSDK.setCustomData([
+    ///     "env": "staging",
+    ///     "buildType": "debug",
+    /// ])
+    /// ```
+    public static func setCustomData(_ data: [String: String]) {
+        customData = data
+    }
+
+    /// Sets a single custom data key/value pair on the global map sent with every
+    /// subsequent bug report. Overwrites the existing value for `key` if any; other
+    /// keys are preserved.
+    ///
+    /// Must be called from the main actor.
+    ///
+    /// Example:
+    /// ```swift
+    /// BugScreenSDK.setCustomData(key: "userId", value: "abc-123")
+    /// ```
+    public static func setCustomData(key: String, value: String) {
+        customData[key] = value
+    }
+
+    /// Removes a single custom data key from the global map. No-op if `key` is not
+    /// present. Other keys are preserved.
+    ///
+    /// Must be called from the main actor.
+    public static func removeCustomData(key: String) {
+        customData.removeValue(forKey: key)
+    }
+
+    /// Merges `data` into the existing custom data map. Keys in `data` overwrite
+    /// existing values; keys not in `data` are preserved.
+    ///
+    /// Must be called from the main actor.
+    ///
+    /// Example:
+    /// ```swift
+    /// BugScreenSDK.addCustomData(["plan": "pro", "region": "eu"])
+    /// ```
+    public static func addCustomData(_ data: [String: String]) {
+        customData.merge(data) { _, new in new }
+    }
+
+    /// Clears any custom data previously set via ``setCustomData(_:)``.
+    public static func clearCustomData() {
+        customData = [:]
+    }
+
     /// Presents the bug report UI.
     ///
     /// Shows a modal screen where users can describe the bug, attach a screenshot,
@@ -201,6 +265,7 @@ public enum BugScreenSDK {
         logger = nil
         apiClient = nil
         configuration = nil
+        customData = [:]
     }
 
     #if DEBUG

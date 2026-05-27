@@ -48,35 +48,31 @@ internal final class APIClient {
 
     /// Submits a bug report to the backend.
     ///
-    /// This method uploads the bug report with optional screenshot and log file
+    /// This method uploads the bug report with optional screenshots and log file
     /// using multipart/form-data encoding. The backend will create issues in all
     /// configured integrations and return the URLs.
     ///
     /// - Parameters:
     ///   - description: User's description of the bug (required, 1-10000 characters)
     ///   - metadata: Device/app metadata to include in the report
-    ///   - screenshot: Optional screenshot image (encoded as PNG when possible, falls back to JPEG)
+    ///   - screenshots: Up to 4 screenshot images. Each is downscaled to a 2000 pt
+    ///     long edge and re-encoded as JPEG q=0.85 before upload so a 4-shot report
+    ///     comfortably fits API Gateway's 10 MB request cap. Extra screenshots beyond
+    ///     the 4th are dropped silently.
+    ///   - type: Reporter-selected bug type ("bug" | "ui" | "crash"). Forwarded to
+    ///     GitHub/Jira as a label on the created issue.
+    ///   - severity: Reporter-selected severity ("low" | "medium" | "high"). Forwarded
+    ///     to GitHub/Jira as a label / priority on the created issue.
     ///   - logFile: Optional log file URL (typically from Logger.exportToFile())
     ///
     /// - Returns: Response containing URLs of created issues
     /// - Throws: BugScreenSDKError for various failure cases
-    ///
-    /// Example:
-    /// ```swift
-    /// let client = APIClient(apiKey: "fb_test_key")
-    /// let metadata = MetadataCollector.collect()
-    /// let response = try await client.submitBugReport(
-    ///     description: "App crashes on login",
-    ///     metadata: metadata,
-    ///     screenshot: someUIImage,
-    ///     logFile: logFileURL
-    /// )
-    /// print(response.issueURLs) // ["https://github.com/..."]
-    /// ```
     func submitBugReport(
         description: String,
         metadata: BugReportMetadata,
-        screenshot: UIImage? = nil,
+        screenshots: [UIImage] = [],
+        type: String? = nil,
+        severity: String? = nil,
         logFile: URL? = nil
     ) async throws -> BugReportResponse {
         // Validate description length
@@ -101,14 +97,24 @@ internal final class APIClient {
             forHTTPHeaderField: "Content-Type"
         )
 
-        // Build multipart body
-        let body = try createMultipartBody(
-            boundary: boundary,
-            description: description,
-            metadata: metadata,
-            screenshot: screenshot,
-            logFile: logFile
-        )
+        // Cap at 4: backend's busboy config rejects >4 `screenshot` parts.
+        let capped = Array(screenshots.prefix(APIClient.maxScreenshots))
+
+        // Downscale + JPEG encoding for 4 retina screenshots can spend 1+ s of
+        // CPU time. The caller is `@MainActor`, so building the body inline
+        // would jank the UI mid-submit. Hop to a background task and await
+        // the encoded bytes.
+        let body = try await Task.detached(priority: .userInitiated) {
+            try APIClient.createMultipartBody(
+                boundary: boundary,
+                description: description,
+                metadata: metadata,
+                screenshots: capped,
+                type: type,
+                severity: severity,
+                logFile: logFile
+            )
+        }.value
         request.httpBody = body
 
         // Perform request. Map well-known URLError codes to typed SDK cases so
@@ -124,6 +130,9 @@ internal final class APIClient {
                 throw BugScreenSDKError.cancelled
             case .timedOut:
                 throw BugScreenSDKError.timeout
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .dataNotAllowed, .internationalRoamingOff:
+                throw BugScreenSDKError.offline
             default:
                 throw BugScreenSDKError.networkError(urlError)
             }
@@ -141,32 +150,28 @@ internal final class APIClient {
         if httpResponse.statusCode == 201 {
             return try JSONDecoder().decode(BugReportResponse.self, from: data)
         }
-        if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
-            throw BugScreenSDKError.apiError(errorResponse.message)
-        }
-        throw BugScreenSDKError.httpError(httpResponse.statusCode)
+        let parsed = try? JSONDecoder().decode(ErrorResponse.self, from: data)
+        throw BugScreenSDKError.httpError(
+            status: httpResponse.statusCode,
+            code: parsed?.code,
+            message: parsed?.message
+        )
     }
 
     // MARK: - Private Helpers
 
     /// Creates a multipart/form-data request body.
     ///
-    /// Follows the OpenAPI specification for the /reports endpoint.
-    ///
-    /// - Parameters:
-    ///   - boundary: Unique boundary string for multipart sections
-    ///   - description: Bug description (required field)
-    ///   - metadata: Device/app metadata (encoded as JSON)
-    ///   - screenshot: Optional screenshot image (encoded as PNG when possible, falls back to JPEG)
-    ///   - logFile: Optional log file
-    ///
-    /// - Returns: Complete multipart form-data body
-    /// - Throws: BugScreenSDKError.encodingError if JSON encoding fails
-    private func createMultipartBody(
+    /// Follows the OpenAPI specification for the /reports endpoint. Static so
+    /// the synchronous body-building work can run on a detached task without
+    /// dragging the `APIClient` instance (and its `URLSession`) across actors.
+    private static func createMultipartBody(
         boundary: String,
         description: String,
         metadata: BugReportMetadata,
-        screenshot: UIImage?,
+        screenshots: [UIImage],
+        type: String?,
+        severity: String?,
         logFile: URL?
     ) throws -> Data {
         var body = Data()
@@ -194,28 +199,36 @@ internal final class APIClient {
         body.append(metadataJSON)
         body.append("\r\n")
 
-        // Prefer lossless PNG; fall back to JPEG q=0.8 so annotated
-        // screenshots aren't degraded by default re-encoding. Retina PNGs can
-        // exceed API Gateway's 10MB request limit, so PNGs above
-        // `maxPngBytes` also fall back to JPEG.
-        if let screenshot = screenshot {
-            let maxPngBytes = 4 * 1024 * 1024
-            let encoded: (data: Data, contentType: String, filename: String)? = {
-                if let png = screenshot.pngData(), png.count <= maxPngBytes {
-                    return (png, "image/png", "screenshot.png")
-                }
-                if let jpeg = screenshot.jpegData(compressionQuality: 0.8) {
-                    return (jpeg, "image/jpeg", "screenshot.jpg")
-                }
-                return nil
-            }()
-            if let encoded = encoded {
-                body.append("--\(boundary)\r\n")
-                body.append("Content-Disposition: form-data; name=\"screenshot\"; filename=\"\(encoded.filename)\"\r\n")
-                body.append("Content-Type: \(encoded.contentType)\r\n\r\n")
-                body.append(encoded.data)
-                body.append("\r\n")
-            }
+        if let type = type {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"type\"\r\n")
+            body.append("Content-Type: text/plain\r\n\r\n")
+            body.append("\(type)\r\n")
+        }
+
+        if let severity = severity {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"severity\"\r\n")
+            body.append("Content-Type: text/plain\r\n\r\n")
+            body.append("\(severity)\r\n")
+        }
+
+        // Downscale + JPEG-encode each screenshot so a 4-shot report fits inside
+        // API Gateway's 10 MB request cap. Raw retina iPhone PNGs are 2–5 MB
+        // each — four of them blow past the limit. JPEG q=0.85 at a 2000 px
+        // long edge is good enough to read text on a bug report and is roughly
+        // an order of magnitude smaller than PNG (matches Android's
+        // `prepareScreenshotFile` in ApiClient.kt, commit 6afce77). Every part
+        // uses the same `screenshot` field name — busboy iterates them on the
+        // server.
+        for (index, screenshot) in screenshots.enumerated() {
+            guard let encoded = APIClient.encodeScreenshotForUpload(screenshot) else { continue }
+            let filename = "screenshot-\(index + 1).\(encoded.fileExt)"
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"screenshot\"; filename=\"\(filename)\"\r\n")
+            body.append("Content-Type: \(encoded.contentType)\r\n\r\n")
+            body.append(encoded.data)
+            body.append("\r\n")
         }
 
         // Add log file (optional)
@@ -232,5 +245,64 @@ internal final class APIClient {
         body.append("--\(boundary)--\r\n")
 
         return body
+    }
+
+    /// Maximum number of screenshots accepted per report. Matches the backend's
+    /// busboy file-count limit and the Android SDK's `MAX_SCREENSHOTS`.
+    static let maxScreenshots = 4
+
+    /// Long-edge cap (in pixels) for uploaded screenshots. 2000 matches
+    /// Android's `MAX_SCREENSHOT_DIMENSION_PX` — small enough that four
+    /// JPEGs fit comfortably under the 10 MB API Gateway request cap, large
+    /// enough to read body text on a phone screen.
+    static let maxScreenshotDimension: CGFloat = 2000
+
+    /// JPEG quality used when re-encoding screenshots before upload.
+    static let screenshotJpegQuality: CGFloat = 0.85
+
+    /// Downscales `image` so its long edge fits within `maxScreenshotDimension`
+    /// and re-encodes as JPEG. Falls back to a raw PNG if JPEG encoding
+    /// genuinely fails — the server still enforces a per-screenshot size
+    /// guard, so this is just a last-ditch attempt to produce *something*.
+    static func encodeScreenshotForUpload(
+        _ image: UIImage
+    ) -> (data: Data, contentType: String, fileExt: String)? {
+        let downscaled = downscale(image, longEdge: maxScreenshotDimension)
+        if let jpeg = downscaled.jpegData(compressionQuality: screenshotJpegQuality) {
+            return (jpeg, "image/jpeg", "jpg")
+        }
+        if let png = downscaled.pngData() {
+            return (png, "image/png", "png")
+        }
+        return nil
+    }
+
+    /// Returns `image` unchanged if its pixel long edge is already within
+    /// `longEdge`; otherwise renders a smaller bitmap whose pixel long edge
+    /// equals `longEdge`. Compares pixel dimensions (`size × scale`), not
+    /// points — a retina screenshot at 1179×2556 px / scale 3 reports a
+    /// point size of 393×852 and would otherwise slip past the cap.
+    private static func downscale(_ image: UIImage, longEdge: CGFloat) -> UIImage {
+        let pointSize = image.size
+        let scale = image.scale
+        let pixelWidth = pointSize.width * scale
+        let pixelHeight = pointSize.height * scale
+        let maxPixelSide = max(pixelWidth, pixelHeight)
+        guard maxPixelSide > longEdge, maxPixelSide > 0 else { return image }
+        let ratio = longEdge / maxPixelSide
+        let target = CGSize(
+            width: floor(pixelWidth * ratio),
+            height: floor(pixelHeight * ratio)
+        )
+        // Render at 1× so the target size we computed in pixels lands 1:1 in
+        // the output bitmap — otherwise the renderer would multiply by the
+        // device scale and we'd overshoot the cap.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
     }
 }

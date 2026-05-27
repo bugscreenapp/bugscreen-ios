@@ -8,7 +8,9 @@ internal protocol BugReportSubmitting {
     @MainActor
     func submitBugReport(
         description: String,
-        screenshot: UIImage?
+        screenshots: [UIImage],
+        type: String?,
+        severity: String?
     ) async throws -> BugReportResponse
 }
 
@@ -39,19 +41,26 @@ internal struct DefaultBugReportSubmitter: BugReportSubmitting {
     @MainActor
     func submitBugReport(
         description: String,
-        screenshot: UIImage?
+        screenshots: [UIImage],
+        type: String?,
+        severity: String?
     ) async throws -> BugReportResponse {
         guard let apiClient = BugScreenSDK.apiClient else {
             throw BugScreenSDKError.notConfigured
         }
 
-        let metadata = MetadataCollector.collect()
+        let customData = BugScreenSDK.customData
+        let metadata = MetadataCollector.collect(
+            customData: customData.isEmpty ? nil : customData
+        )
         let logFile = BugScreenSDK.logger?.exportToFile()
 
         let response = try await apiClient.submitBugReport(
             description: description,
             metadata: metadata,
-            screenshot: screenshot,
+            screenshots: screenshots,
+            type: type,
+            severity: severity,
             logFile: logFile
         )
 

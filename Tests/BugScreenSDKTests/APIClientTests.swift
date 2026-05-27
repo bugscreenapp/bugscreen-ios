@@ -100,13 +100,125 @@ final class APIClientTests: XCTestCase {
         _ = try await makeClient().submitBugReport(
             description: "shot",
             metadata: sampleMetadata(),
-            screenshot: TestHelpers.solidImage()
+            screenshots: [TestHelpers.solidImage()]
         )
 
-        // PNG bytes aren't UTF-8, so search the raw Data, not a String view.
+        // Screenshots are always JPEG-encoded on the wire — the client
+        // downscales + re-encodes at q=0.85 so a 4-shot report fits the API
+        // Gateway 10 MB cap. Search raw Data (JPEG bytes aren't UTF-8).
         let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
-        XCTAssertTrue(body.contains(utf8Bytes: "name=\"screenshot\"; filename=\"screenshot.png\""))
-        XCTAssertTrue(body.contains(utf8Bytes: "Content-Type: image/png"))
+        XCTAssertTrue(body.contains(utf8Bytes: "name=\"screenshot\"; filename=\"screenshot-1.jpg\""))
+        XCTAssertTrue(body.contains(utf8Bytes: "Content-Type: image/jpeg"))
+    }
+
+    func testMultipartBodyContainsAllScreenshotsInOrder() async throws {
+        stubSuccess()
+        let images = [
+            TestHelpers.solidImage(color: .red),
+            TestHelpers.solidImage(color: .green),
+            TestHelpers.solidImage(color: .blue)
+        ]
+        _ = try await makeClient().submitBugReport(
+            description: "shots",
+            metadata: sampleMetadata(),
+            screenshots: images
+        )
+
+        let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
+        for index in 1...images.count {
+            XCTAssertTrue(
+                body.contains(utf8Bytes: "name=\"screenshot\"; filename=\"screenshot-\(index).jpg\""),
+                "Expected multipart part for screenshot-\(index)"
+            )
+        }
+    }
+
+    func testScreenshotsCapAtFourEvenIfMorePassed() async throws {
+        stubSuccess()
+        let images = (1...6).map { _ in TestHelpers.solidImage() }
+        _ = try await makeClient().submitBugReport(
+            description: "shots",
+            metadata: sampleMetadata(),
+            screenshots: images
+        )
+
+        let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
+        for index in 1...4 {
+            XCTAssertTrue(body.contains(utf8Bytes: "filename=\"screenshot-\(index).jpg\""))
+        }
+        XCTAssertFalse(body.contains(utf8Bytes: "filename=\"screenshot-5"))
+    }
+
+    func testScreenshotsAreDownscaledToFitDimensionCap() async throws {
+        stubSuccess()
+        // A 6000×4000 raw image — way over the 2000 px long-edge cap.
+        let oversized = TestHelpers.solidImage(width: 6000, height: 4000, color: .blue)
+        _ = try await makeClient().submitBugReport(
+            description: "huge",
+            metadata: sampleMetadata(),
+            screenshots: [oversized]
+        )
+
+        let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
+        let encoded = try XCTUnwrap(APIClient.encodeScreenshotForUpload(oversized))
+        // Sanity-check the encoder caps the long edge at ~2000 px and the
+        // result is small (single screenshot well under 1 MB).
+        let decoded = try XCTUnwrap(UIImage(data: encoded.data))
+        XCTAssertLessThanOrEqual(max(decoded.size.width, decoded.size.height), APIClient.maxScreenshotDimension)
+        XCTAssertLessThan(encoded.data.count, 1_000_000)
+        XCTAssertEqual(encoded.contentType, "image/jpeg")
+        // And the body must include the JPEG part for the downscaled shot.
+        XCTAssertTrue(body.contains(utf8Bytes: "Content-Type: image/jpeg"))
+    }
+
+    func testScreenshotsAreDownscaledByPixelSizeNotPointSize() throws {
+        // Retina screenshot shape: 1179×2556 px at scale 3 ⇒ point size 393×852.
+        // The point-based check would let this through untouched; the pixel
+        // check must catch it.
+        let image = TestHelpers.retinaImage(pixelWidth: 1179, pixelHeight: 2556, scale: 3)
+        XCTAssertLessThan(max(image.size.width, image.size.height), APIClient.maxScreenshotDimension)
+        XCTAssertGreaterThan(
+            max(image.size.width, image.size.height) * image.scale,
+            APIClient.maxScreenshotDimension
+        )
+
+        let encoded = try XCTUnwrap(APIClient.encodeScreenshotForUpload(image))
+        // `UIImage(data:)` loads JPEGs at scale 1, so `size` reflects pixels here.
+        let decoded = try XCTUnwrap(UIImage(data: encoded.data))
+        XCTAssertLessThanOrEqual(
+            max(decoded.size.width, decoded.size.height),
+            APIClient.maxScreenshotDimension
+        )
+    }
+
+    func testMultipartBodyOmitsTypeAndSeverityWhenNil() async throws {
+        stubSuccess()
+        _ = try await makeClient().submitBugReport(
+            description: "valid",
+            metadata: sampleMetadata()
+        )
+
+        let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
+        let text = String(data: body, encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("name=\"type\""))
+        XCTAssertFalse(text.contains("name=\"severity\""))
+    }
+
+    func testMultipartBodyIncludesTypeAndSeverityWhenProvided() async throws {
+        stubSuccess()
+        _ = try await makeClient().submitBugReport(
+            description: "valid",
+            metadata: sampleMetadata(),
+            type: "ui",
+            severity: "high"
+        )
+
+        let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
+        let text = String(data: body, encoding: .utf8) ?? ""
+        XCTAssertTrue(text.contains("name=\"type\""))
+        XCTAssertTrue(text.contains("\r\n\r\nui\r\n"))
+        XCTAssertTrue(text.contains("name=\"severity\""))
+        XCTAssertTrue(text.contains("\r\n\r\nhigh\r\n"))
     }
 
     func testMultipartBodyContainsLogFile() async throws {
@@ -180,7 +292,7 @@ final class APIClientTests: XCTestCase {
         )
     }
 
-    func test400ResponseThrowsAPIError() async {
+    func test400ResponseThrowsHTTPErrorWithMessage() async {
         stubStatus(400, body: errorResponseJSON(
             error: "Bad Request",
             message: "Description is required",
@@ -189,14 +301,15 @@ final class APIClientTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(
             try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
         ) { error in
-            guard case let BugScreenSDKError.apiError(message) = error else {
-                return XCTFail("Expected .apiError, got \(error)")
+            guard case let BugScreenSDKError.httpError(status, _, message) = error else {
+                return XCTFail("Expected .httpError, got \(error)")
             }
+            XCTAssertEqual(status, 400)
             XCTAssertEqual(message, "Description is required")
         }
     }
 
-    func test401ResponseThrowsUnauthorizedError() async {
+    func test401ResponseThrowsHTTPErrorWithMessage() async {
         stubStatus(401, body: errorResponseJSON(
             error: "Unauthorized",
             message: "Invalid or revoked API key",
@@ -205,14 +318,15 @@ final class APIClientTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(
             try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
         ) { error in
-            guard case let BugScreenSDKError.apiError(message) = error else {
-                return XCTFail("Expected .apiError, got \(error)")
+            guard case let BugScreenSDKError.httpError(status, _, message) = error else {
+                return XCTFail("Expected .httpError, got \(error)")
             }
+            XCTAssertEqual(status, 401)
             XCTAssertEqual(message, "Invalid or revoked API key")
         }
     }
 
-    func test500ResponseThrowsServerError() async {
+    func test500ResponseThrowsHTTPErrorWithMessage() async {
         stubStatus(500, body: errorResponseJSON(
             error: "Internal Server Error",
             message: "Failed to create issue in GitHub: repository not found",
@@ -221,24 +335,27 @@ final class APIClientTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(
             try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
         ) { error in
-            guard case let BugScreenSDKError.apiError(message) = error else {
-                return XCTFail("Expected .apiError, got \(error)")
+            guard case let BugScreenSDKError.httpError(status, _, message) = error else {
+                return XCTFail("Expected .httpError, got \(error)")
             }
+            XCTAssertEqual(status, 500)
             XCTAssertEqual(message, "Failed to create issue in GitHub: repository not found")
         }
     }
 
     // Locks the fallback at `APIClient.submitBugReport` where an undecodable
-    // error body falls through to `.httpError(statusCode)`.
+    // error body falls through to `.httpError(status:, code: nil, message: nil)`.
     func test500WithUndecodableBodyThrowsHTTPError() async {
         stubStatus(500, body: Data())
         await XCTAssertThrowsErrorAsync(
             try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
         ) { error in
-            guard case let BugScreenSDKError.httpError(code) = error else {
+            guard case let BugScreenSDKError.httpError(status, code, message) = error else {
                 return XCTFail("Expected .httpError, got \(error)")
             }
-            XCTAssertEqual(code, 500)
+            XCTAssertEqual(status, 500)
+            XCTAssertNil(code)
+            XCTAssertNil(message)
         }
     }
 
@@ -270,15 +387,26 @@ final class APIClientTests: XCTestCase {
         }
     }
 
-    func testUnmappedURLErrorFallsBackToNetworkError() async {
+    func testNotConnectedToInternetMapsToOffline() async {
         stubURLError(.notConnectedToInternet)
+        await XCTAssertThrowsErrorAsync(
+            try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
+        ) { error in
+            guard case BugScreenSDKError.offline = error else {
+                return XCTFail("Expected .offline, got \(error)")
+            }
+        }
+    }
+
+    func testUnmappedURLErrorFallsBackToNetworkError() async {
+        stubURLError(.badServerResponse)
         await XCTAssertThrowsErrorAsync(
             try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
         ) { error in
             guard case let BugScreenSDKError.networkError(underlying) = error else {
                 return XCTFail("Expected .networkError, got \(error)")
             }
-            XCTAssertEqual((underlying as? URLError)?.code, .notConnectedToInternet)
+            XCTAssertEqual((underlying as? URLError)?.code, .badServerResponse)
         }
     }
 
@@ -393,27 +521,30 @@ final class APIModelsTests: XCTestCase {
         XCTAssertEqual(response.statusCode, 401)
     }
 
-    func testErrorResponse500DecodingSurfacesMessage() throws {
-        // The backend sends ErrorResponse for 5xx too. iOS surfaces the
-        // message verbatim in the .apiError payload so support tickets read
-        // the same as Android; errorDescription prefixes it for uniform
-        // human-readable formatting across all SDK error cases.
+    func testErrorResponse500DecodingPreservesTechnicalDetail() throws {
         let json = """
         {
             "error": "Internal Server Error",
             "message": "Failed to create issue in GitHub: repository not found",
-            "statusCode": 500
+            "statusCode": 500,
+            "code": "integrations.all_failed"
         }
         """
 
         let data = json.data(using: .utf8)!
-        let decoder = JSONDecoder()
-        let response = try decoder.decode(ErrorResponse.self, from: data)
-
+        let response = try JSONDecoder().decode(ErrorResponse.self, from: data)
         XCTAssertEqual(response.statusCode, 500)
-        XCTAssertEqual(response.message, "Failed to create issue in GitHub: repository not found")
-        let surfaced = BugScreenSDKError.apiError(response.message).errorDescription
-        XCTAssertEqual(surfaced, "API error: Failed to create issue in GitHub: repository not found")
+        XCTAssertEqual(response.code, "integrations.all_failed")
+        let error = BugScreenSDKError.httpError(
+            status: response.statusCode,
+            code: response.code,
+            message: response.message
+        )
+        XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)
+        XCTAssertEqual(
+            error.technicalDetail,
+            "HTTP 500 · code=integrations.all_failed · Failed to create issue in GitHub: repository not found"
+        )
     }
 }
 

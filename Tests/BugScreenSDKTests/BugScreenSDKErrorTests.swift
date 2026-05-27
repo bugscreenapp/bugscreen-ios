@@ -1,79 +1,81 @@
+import Foundation
 import XCTest
 @testable import BugScreenSDK
 
-/// Locks the human-readable `errorDescription` format for every public
-/// `BugScreenSDKError` case. Every arm uses a `"<Category>: ..."` prefix or a
-/// complete sentence; consumers (logging, alerts) can rely on a uniform shape.
+/// Verifies the user-facing message routing for `BugScreenSDKError`. The exact
+/// localized text is owned by `Localizable.xcstrings` — these tests check that
+/// each case + backend `code` is mapped to the right bucket (config vs server
+/// vs validation) and that technical details are preserved for "Show details".
 final class BugScreenSDKErrorTests: XCTestCase {
 
-    func testNotConfiguredDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.notConfigured.errorDescription,
-            "BugScreenSDK not configured. Call BugScreenSDK.configure() before using the SDK."
-        )
+    func test_notConfigured_routesToConfigMessage() {
+        let error = BugScreenSDKError.notConfigured
+        XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)
+        XCTAssertNotNil(error.technicalDetail)
     }
 
-    func testInvalidArgumentDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.invalidArgument("description is empty").errorDescription,
-            "Invalid argument: description is empty"
-        )
+    func test_invalidArgument_routesToConfigMessage() {
+        let error = BugScreenSDKError.invalidArgument("x")
+        XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)
+        XCTAssertEqual(error.technicalDetail, "Invalid argument: x")
     }
 
-    func testInvalidURLDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.invalidURL.errorDescription,
-            "Invalid API URL. Please check your configuration."
-        )
+    func test_invalidURL_routesToConfigMessage() {
+        XCTAssertEqual(BugScreenSDKError.invalidURL.userMessage, SDKStrings.errorConfig)
     }
 
-    func testInvalidResponseDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.invalidResponse.errorDescription,
-            "Invalid server response. Please try again."
-        )
+    func test_offline_routesToOfflineMessage() {
+        XCTAssertEqual(BugScreenSDKError.offline.userMessage, SDKStrings.errorOffline)
     }
 
-    func testHTTPErrorDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.httpError(401).errorDescription,
-            "HTTP error: 401. Unauthorized. Please check your API key."
-        )
+    func test_timeout_routesToTimeoutMessage() {
+        XCTAssertEqual(BugScreenSDKError.timeout.userMessage, SDKStrings.errorTimeout)
     }
 
-    func testAPIErrorDescriptionIsPrefixed() {
-        XCTAssertEqual(
-            BugScreenSDKError.apiError("repo not found").errorDescription,
-            "API error: repo not found"
-        )
+    func test_httpError_authCode_routesToConfigMessage() {
+        let error = BugScreenSDKError.httpError(status: 401, code: "auth.invalid_key", message: "bad")
+        XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)
+        XCTAssertEqual(error.technicalDetail, "HTTP 401 · code=auth.invalid_key · bad")
     }
 
-    func testCancelledDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.cancelled.errorDescription,
-            "Request cancelled."
-        )
+    func test_httpError_validationDescription_routesToDescriptionRequired() {
+        let error = BugScreenSDKError.httpError(status: 400, code: "validation.description", message: nil)
+        XCTAssertEqual(error.userMessage, SDKStrings.validationDescriptionRequired)
     }
 
-    func testTimeoutDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.timeout.errorDescription,
-            "Request timed out. Please try again."
-        )
+    func test_httpError_validationFileTooLarge_routesToFileTooLargeMessage() {
+        let error = BugScreenSDKError.httpError(status: 400, code: "validation.file_too_large", message: nil)
+        XCTAssertEqual(error.userMessage, SDKStrings.validationFileTooLarge)
     }
 
-    func testNetworkErrorDescription() {
-        let underlying = URLError(.notConnectedToInternet)
-        XCTAssertEqual(
-            BugScreenSDKError.networkError(underlying).errorDescription,
-            "Network error: \(underlying.localizedDescription)"
-        )
+    func test_httpError_serverStorage_routesToServerMessage() {
+        let error = BugScreenSDKError.httpError(status: 500, code: "server.storage", message: nil)
+        XCTAssertEqual(error.userMessage, SDKStrings.errorServer)
     }
 
-    func testEncodingErrorDescription() {
-        XCTAssertEqual(
-            BugScreenSDKError.encodingError.errorDescription,
-            "Failed to encode request data. Please check your input."
-        )
+    func test_httpError_integrationsAllFailed_routesToConfigMessage() {
+        let error = BugScreenSDKError.httpError(status: 500, code: "integrations.all_failed", message: nil)
+        XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)
+    }
+
+    func test_httpError_noCode_5xx_fallsBackToServerMessage() {
+        let error = BugScreenSDKError.httpError(status: 500, code: nil, message: "boom")
+        XCTAssertEqual(error.userMessage, SDKStrings.errorServer)
+        XCTAssertEqual(error.technicalDetail, "HTTP 500 · boom")
+    }
+
+    func test_httpError_noCode_401_fallsBackToConfigMessage() {
+        let error = BugScreenSDKError.httpError(status: 401, code: nil, message: nil)
+        XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)
+    }
+
+    func test_httpError_noCode_429_fallsBackToRateLimitedMessage() {
+        let error = BugScreenSDKError.httpError(status: 429, code: nil, message: nil)
+        XCTAssertEqual(error.userMessage, SDKStrings.errorRateLimited)
+    }
+
+    func test_errorDescription_matchesUserMessage() {
+        let error = BugScreenSDKError.offline
+        XCTAssertEqual(error.errorDescription, error.userMessage)
     }
 }

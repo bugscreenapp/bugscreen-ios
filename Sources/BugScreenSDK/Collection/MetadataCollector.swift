@@ -25,7 +25,6 @@ internal enum MetadataKeys {
     static let totalMemory = "Total Memory"
     static let availableMemory = "Available Memory"
     static let locale = "Locale"
-    static let customData = "Custom Data"
 }
 
 internal enum MetadataCollector {
@@ -52,7 +51,9 @@ internal enum MetadataCollector {
             MetadataKeys.locale: Locale.current.identifier
         ]
         if let customData = customData {
-            metadata[MetadataKeys.customData] = customData
+            for (key, value) in customData {
+                metadata[key] = value
+            }
         }
         return metadata
     }

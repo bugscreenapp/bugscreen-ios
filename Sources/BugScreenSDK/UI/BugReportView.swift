@@ -1,87 +1,117 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 /// SwiftUI view for submitting bug reports.
 ///
-/// Displays a form with description editor, screenshot attachment, device info,
-/// and submit button. Handles loading states and success/error alerts.
-/// Uses minimal black/white design matching Android SDK.
+/// Visual design mirrors the BugScreen brand tokens (cream/warm/ink + emerald
+/// accent) shipped on Android in commit `ef54946`. The bottom-sheet behavior
+/// (scrim, slide-in, drag-to-dismiss, detents, grabber) is owned by UIKit's
+/// `UISheetPresentationController` configured on `BugReportHostingController`;
+/// this view renders only the sheet's content.
 internal struct BugReportView: View {
 
-    // MARK: - Properties
+    @ObservedObject private var viewModel: BugReportViewModel
 
-    @StateObject private var viewModel: BugReportViewModel
+    @State private var showPhotoPicker = false
+    @FocusState private var descriptionFocused: Bool
 
-    @State private var showImagePicker = false
-    @State private var showMetadata = false
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    // MARK: - Initialization
-
-    init(
-        screenshot: UIImage? = nil,
-        autoAttach: Bool = false,
-        onDismiss: @escaping () -> Void
-    ) {
-        _viewModel = StateObject(wrappedValue: BugReportViewModel(
-            screenshot: screenshot,
-            autoAttach: autoAttach,
-            onDismiss: onDismiss
-        ))
+    init(viewModel: BugReportViewModel) {
+        self.viewModel = viewModel
     }
 
-    // MARK: - Body
-
     var body: some View {
-        NavigationView {
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 16) {
-                    descriptionSection
-                    screenshotSection
-                    deviceInfoSection
-                    actionButtons
-                    if let error = viewModel.errorMessage {
-                        errorSection(error)
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Report an issue")
+                        .font(.system(size: 22, weight: .semibold))
+                        .trackingCompat(-0.4)
+                        .foregroundColor(Brand.ink)
+
+                    DescriptionField(
+                        text: $viewModel.description,
+                        focused: $descriptionFocused,
+                        enabled: viewModel.submissionState != .submitting
+                    )
+                    if let validation = viewModel.descriptionValidationMessage {
+                        Text(validation)
+                            .font(.system(size: 12))
+                            .foregroundColor(Brand.dangerText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Section(label: "Type") {
+                        TypeChipRow(selection: $viewModel.bugType)
+                    }
+
+                    Section(label: "Severity") {
+                        SeverityRow(selection: $viewModel.severity)
+                    }
+
+                    Section(label: "Attachments") {
+                        AttachmentRow(
+                            screenshots: viewModel.screenshots,
+                            canAddMore: viewModel.canAddMoreScreenshots,
+                            enabled: viewModel.submissionState != .submitting,
+                            onAdd: { showPhotoPicker = true },
+                            onRemove: { viewModel.removeScreenshot(at: $0) }
+                        )
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
             }
-            .background(backgroundColor)
-            .navigationTitle("Report Bug")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        viewModel.dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .foregroundColor(primaryColor)
-                    }
-                    .disabled(viewModel.submissionState == .submitting)
-                }
+            .scrollDismissesKeyboardCompat()
+
+            footer
+        }
+        .background(Brand.paper.ignoresSafeArea())
+        .onChange(of: viewModel.description) { _ in
+            if viewModel.descriptionValidationMessage != nil {
+                viewModel.descriptionValidationMessage = nil
             }
-            .alert("Submission Failed", isPresented: $viewModel.showErrorAlert) {
-                Button("OK", role: .cancel) {}
-                Button("Try Again") {
-                    Task {
-                        await viewModel.submit()
-                    }
-                }
-            } message: {
-                Text(viewModel.errorMessage ?? "An unknown error occurred")
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPickerSheet(selectionLimit: max(1, viewModel.remainingScreenshotSlots)) { images in
+                viewModel.addScreenshots(images)
             }
-            .sheet(isPresented: $showImagePicker) {
-                ImagePicker(image: $viewModel.screenshot)
-            }
-            .onAppear {
-                viewModel.onAppear(presenter: Self.topPresentedViewController())
-            }
+        }
+        .onAppear {
+            viewModel.onAppear(presenter: Self.topPresentedViewController())
         }
     }
 
-    /// Finds the topmost presented view controller in the active scene, used as the host for
-    /// the auto-attach permission rationale alert.
+    private var footer: some View {
+        VStack(spacing: 10) {
+            if let error = viewModel.lastError,
+               viewModel.submissionState == .error {
+                ErrorSnackbar(error: error)
+            }
+            CreateTicketButton(
+                isLoading: viewModel.submissionState == .submitting,
+                enabled: viewModel.canSubmit,
+                onTap: {
+                    descriptionFocused = false
+                    Task { await viewModel.submit() }
+                }
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 18)
+        .background(
+            Brand.paper
+                .overlay(
+                    Rectangle()
+                        .fill(Brand.cream100)
+                        .frame(height: 1),
+                    alignment: .top
+                )
+        )
+    }
+
     @MainActor
     private static func topPresentedViewController() -> UIViewController? {
         guard let scene = UIApplication.shared.connectedScenes
@@ -95,299 +125,529 @@ internal struct BugReportView: View {
         }
         return top
     }
-
-    // MARK: - Theme Colors
-
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FAFAFA")
-    }
-
-    private var surfaceColor: Color {
-        colorScheme == .dark ? Color(hex: "1E1E1E") : Color.white
-    }
-
-    private var primaryColor: Color {
-        colorScheme == .dark ? Color.white : Color.black
-    }
-
-    private var secondaryColor: Color {
-        colorScheme == .dark ? Color(hex: "E0E0E0") : Color(hex: "757575")
-    }
-
-    private var borderColor: Color {
-        colorScheme == .dark ? Color(hex: "2C2C2C") : Color(hex: "E0E0E0")
-    }
-
-    private var errorBackgroundColor: Color {
-        colorScheme == .dark ? Color(hex: "CF6679").opacity(0.2) : Color(hex: "B00020").opacity(0.1)
-    }
-
-    private var errorTextColor: Color {
-        colorScheme == .dark ? Color(hex: "CF6679") : Color(hex: "B00020")
-    }
-
-    // MARK: - Description Section
-
-    private var descriptionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Description *")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(primaryColor)
-
-            TextEditor(text: $viewModel.description)
-                .frame(minHeight: 150)
-                .padding(8)
-                .background(surfaceColor)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(borderColor, lineWidth: 1)
-                )
-                .disabled(viewModel.submissionState == .submitting)
-        }
-        .padding(12)
-        .background(surfaceColor)
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(borderColor, lineWidth: 1)
-        )
-    }
-
-    // MARK: - Screenshot Section
-
-    private var screenshotSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Screenshot (Optional)")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(primaryColor)
-
-                Spacer()
-
-                if viewModel.screenshot != nil {
-                    Button("Change") {
-                        showImagePicker = true
-                    }
-                    .font(.system(size: 14))
-                    .foregroundColor(primaryColor)
-                    .disabled(viewModel.submissionState == .submitting)
-                }
-            }
-
-            if let screenshot = viewModel.screenshot {
-                Image(uiImage: screenshot)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxHeight: 200)
-                    .cornerRadius(4)
-            } else {
-                Button {
-                    showImagePicker = true
-                } label: {
-                    Text("Select Screenshot")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(primaryColor)
-                        .frame(maxWidth: .infinity)
-                        .padding(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(borderColor, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.submissionState == .submitting)
-            }
-        }
-        .padding(12)
-        .background(surfaceColor)
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(borderColor, lineWidth: 1)
-        )
-    }
-
-    // MARK: - Device Info Section
-
-    private var deviceInfoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Device Information")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(primaryColor)
-
-                Spacer()
-
-                Button(showMetadata ? "Hide" : "Show") {
-                    withAnimation {
-                        showMetadata.toggle()
-                    }
-                }
-                .font(.system(size: 14))
-                .foregroundColor(primaryColor)
-            }
-
-            if showMetadata {
-                VStack(alignment: .leading, spacing: 4) {
-                    deviceInfoRow(label: "Device", key: MetadataKeys.device)
-                    deviceInfoRow(label: "OS Version", key: MetadataKeys.osVersion)
-                    deviceInfoRow(label: "App Version", key: MetadataKeys.appVersion)
-                    deviceInfoRow(label: "Build Number", key: MetadataKeys.appBuildNumber)
-                    deviceInfoResolutionRow()
-                    deviceInfoRow(label: "Locale", key: MetadataKeys.locale)
-                }
-                .font(.system(size: 12, design: .monospaced))
-            }
-        }
-        .padding(12)
-        .background(surfaceColor)
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(borderColor, lineWidth: 1)
-        )
-    }
-
-    private func deviceInfoRow(label: String, key: String) -> some View {
-        let value = (viewModel.metadata[key] as? String) ?? ""
-        return HStack(alignment: .top) {
-            Text(label + ":")
-                .foregroundColor(secondaryColor)
-            Spacer()
-            Text(value)
-                .foregroundColor(primaryColor)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func deviceInfoResolutionRow() -> some View {
-        let width = viewModel.metadata[MetadataKeys.screenWidthPixels] as? Int
-        let height = viewModel.metadata[MetadataKeys.screenHeightPixels] as? Int
-        let display: String = {
-            if let width = width, let height = height {
-                return "\(width) x \(height) px"
-            }
-            return "—"
-        }()
-        return HStack(alignment: .top) {
-            Text("Screen Resolution:")
-                .foregroundColor(secondaryColor)
-            Spacer()
-            Text(display)
-                .foregroundColor(primaryColor)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    // MARK: - Action Buttons
-
-    private var actionButtons: some View {
-        HStack(spacing: 8) {
-            Button {
-                viewModel.dismiss()
-            } label: {
-                Text("Cancel")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(primaryColor)
-                    .frame(maxWidth: .infinity)
-                    .padding(14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(borderColor, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.submissionState == .submitting)
-
-            Button {
-                Task {
-                    await viewModel.submit()
-                }
-            } label: {
-                if viewModel.submissionState == .submitting {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .black : .white))
-                        .frame(maxWidth: .infinity)
-                        .padding(14)
-                } else {
-                    Text("Submit")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(colorScheme == .dark ? .black : .white)
-                        .frame(maxWidth: .infinity)
-                        .padding(14)
-                }
-            }
-            .background(viewModel.canSubmit ? primaryColor : secondaryColor.opacity(0.5))
-            .cornerRadius(8)
-            .buttonStyle(.plain)
-            .disabled(!viewModel.canSubmit)
-        }
-    }
-
-    // MARK: - Error Section
-
-    private func errorSection(_ error: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Submission Failed")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(errorTextColor)
-
-            Text(error)
-                .font(.system(size: 13))
-                .foregroundColor(errorTextColor)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(errorBackgroundColor)
-        .cornerRadius(8)
-    }
-
 }
 
-// MARK: - Image Picker
+// MARK: - Form pieces
 
-/// UIImagePickerController wrapper.
+private struct Section<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label.uppercased())
+                .font(.system(size: 12, weight: .semibold))
+                .trackingCompat(0.6)
+                .foregroundColor(Brand.warm500)
+            content()
+        }
+    }
+}
+
+private struct DescriptionField: View {
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    let enabled: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("WHAT HAPPENED?")
+                .font(.system(size: 12, weight: .semibold))
+                .trackingCompat(0.6)
+                .foregroundColor(Brand.warm500)
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("Describe the bug")
+                        .font(.system(size: 15))
+                        .foregroundColor(Brand.warm400)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $text)
+                    .focused(focused)
+                    .disabled(!enabled)
+                    .font(.system(size: 15))
+                    .foregroundColor(Brand.warm700)
+                    .tint(Brand.accent)
+                    .scrollContentBackgroundCompat()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .frame(minHeight: 100)
+            }
+            .background(Brand.paper)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        focused.wrappedValue ? Brand.accent : Brand.cream200,
+                        lineWidth: focused.wrappedValue ? 2 : 1
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+}
+
+private struct TypeChipRow: View {
+    @Binding var selection: BugReportViewModel.BugType
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(BugReportViewModel.BugType.allCases) { type in
+                TypeChip(type: type, active: selection == type) {
+                    selection = type
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+private struct TypeChip: View {
+    let type: BugReportViewModel.BugType
+    let active: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(type.displayName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(active ? Brand.accentInk : Brand.warm600)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(active ? Brand.accentTint : Brand.paper)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(active ? Brand.accentSoft : Brand.cream200, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SeverityRow: View {
+    @Binding var selection: BugReportViewModel.Severity
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(BugReportViewModel.Severity.allCases) { sev in
+                SeverityPill(severity: sev, active: selection == sev) {
+                    selection = sev
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+private struct SeverityPill: View {
+    let severity: BugReportViewModel.Severity
+    let active: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 6, height: 6)
+                Text(severity.displayName)
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundColor(active ? Brand.paper : Brand.warm600)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(active ? Brand.ink : Brand.cream50)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(active ? Brand.ink : Brand.cream200, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var dotColor: Color {
+        switch severity {
+        case .low:    return Brand.sevLow
+        case .medium: return Brand.sevMed
+        case .high:   return Brand.sevHigh
+        }
+    }
+}
+
+private struct AttachmentRow: View {
+    let screenshots: [UIImage]
+    let canAddMore: Bool
+    let enabled: Bool
+    let onAdd: () -> Void
+    let onRemove: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(screenshots.enumerated()), id: \.offset) { index, image in
+                AttachmentThumb(image: image, enabled: enabled) {
+                    onRemove(index)
+                }
+            }
+            if canAddMore {
+                AddTile(enabled: enabled, onTap: onAdd)
+            }
+        }
+    }
+}
+
+private struct AttachmentThumb: View {
+    let image: UIImage
+    let enabled: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Brand.cream100, lineWidth: 1)
+                )
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 18, height: 18)
+                    .background(Color.black.opacity(0.7))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(4)
+            .disabled(!enabled)
+            .accessibilityLabel("Remove attachment")
+        }
+        .frame(width: 72, height: 72)
+    }
+}
+
+private struct AddTile: View {
+    let enabled: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .medium))
+                Text("Add")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(Brand.warm500)
+            .frame(width: 72, height: 72)
+            .background(Brand.cream50)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        Brand.cream300,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+private struct CreateTicketButton: View {
+    let isLoading: Bool
+    let enabled: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: Brand.onPrimary))
+                } else {
+                    Text("Create ticket")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Brand.onPrimary)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(enabled || isLoading ? Brand.primary : Brand.warm600)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: Color(red: 0.04, green: 0.06, blue: 0.08).opacity(0.22), radius: 14, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled || isLoading)
+    }
+}
+
+private struct ErrorSnackbar: View {
+    let error: BugScreenSDKError
+    @State private var detailsVisible = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(SDKStrings.errorTitle)
+                .font(.system(size: 13, weight: .semibold))
+            Text(error.userMessage)
+                .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail = error.technicalDetail, !detail.isEmpty {
+                Button {
+                    detailsVisible.toggle()
+                } label: {
+                    Text(detailsVisible ? SDKStrings.errorDetailsHide : SDKStrings.errorDetailsShow)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+                if detailsVisible {
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .foregroundColor(Brand.dangerText)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Brand.dangerBg)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Brand.dangerBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// Success confirmation rendered after submit. Used by the SwiftUI sheet
+/// content during the success state and by `SuccessToastPresenter` for the
+/// transient post-dismiss window.
+internal struct SuccessToast: View {
+    let partialFailures: [BugReportPartialFailure]
+    @State private var detailsVisible = false
+
+    init(partialFailures: [BugReportPartialFailure] = []) {
+        self.partialFailures = partialFailures
+    }
+
+    private var hasPartials: Bool { !partialFailures.isEmpty }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(hasPartials ? Brand.sevMed : Brand.accent)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(Brand.onPrimary)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(hasPartials ? SDKStrings.successPartialTitle : SDKStrings.successTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Brand.ink)
+                Text(hasPartials ? SDKStrings.successPartialMessage : SDKStrings.successMessage)
+                    .font(.system(size: 13))
+                    .foregroundColor(Brand.warm500)
+                    .fixedSize(horizontal: false, vertical: true)
+                if hasPartials {
+                    Button {
+                        detailsVisible.toggle()
+                    } label: {
+                        Text(detailsVisible ? SDKStrings.errorDetailsHide : SDKStrings.errorDetailsShow)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Brand.ink)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                    if detailsVisible {
+                        ForEach(partialFailures.indices, id: \.self) { index in
+                            let failure = partialFailures[index]
+                            Text("\(failure.type): \(failure.message)")
+                                .font(.system(size: 12))
+                                .foregroundColor(Brand.warm600)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Brand.paper)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Brand.cream100, lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.22), radius: 18, x: 0, y: 8)
+    }
+}
+
+// MARK: - Brand palette
+
+/// Each token resolves to a different concrete color depending on the current
+/// `userInterfaceStyle` — UIKit's `UIColor(dynamicProvider:)` is consulted at
+/// render time, so changing system appearance updates the sheet without any
+/// explicit `@Environment(\.colorScheme)` wiring.
 ///
-/// Note: For iOS 16+, we could use PhotosPicker instead.
-internal struct ImagePicker: UIViewControllerRepresentable {
+/// Light values mirror the brand spec from `bugscreen.app`. Dark values are
+/// hand-tuned counterparts: surfaces invert (paper → near-black), cream
+/// hairlines step up to mid-greys, ink and warms invert, and the emerald
+/// accent shifts slightly brighter so it reads against a dark surface.
+internal enum Brand {
+    static let paper       = dynamic(light: 0xFFFFFF, dark: 0x1B1A18)
+    static let cream50     = dynamic(light: 0xF7F7F6, dark: 0x232220)
+    static let cream100    = dynamic(light: 0xEFEFEE, dark: 0x2D2B28)
+    static let cream200    = dynamic(light: 0xE3E3E1, dark: 0x3A3835)
+    static let cream300    = dynamic(light: 0xC7C7C5, dark: 0x4F4D49)
+    static let warm400     = dynamic(light: 0x98989A, dark: 0x7F7C76)
+    static let warm500     = dynamic(light: 0x757575, dark: 0xA6A39D)
+    static let warm600     = dynamic(light: 0x474747, dark: 0xD2D0CA)
+    static let warm700     = dynamic(light: 0x2D2D2D, dark: 0xE8E6E0)
+    static let ink         = dynamic(light: 0x0F0F0F, dark: 0xF7F6F1)
+    static let accent      = dynamic(light: 0x047857, dark: 0x34B58A)
+    static let accentSoft  = dynamic(light: 0x9FD4BE, dark: 0x1F5A48)
+    static let accentTint  = dynamic(light: 0xD5EBE0, dark: 0x142E26)
+    static let accentInk   = dynamic(light: 0x053D2C, dark: 0xA8E5CA)
+    static let dangerBg    = dynamic(light: 0xFBEAEE, dark: 0x3A1820)
+    static let dangerBorder = dynamic(light: 0xF3C5CD, dark: 0x5C2333)
+    static let dangerText  = dynamic(light: 0x7A1D2E, dark: 0xF7B6C0)
+    static let sevLow      = accent
+    static let sevMed      = dynamic(light: 0xF0B96B, dark: 0xF0B96B)
+    static let sevHigh     = dynamic(light: 0x7A1D2E, dark: 0xF08599)
+    /// Primary CTA — filled ink in light, filled emerald in dark.
+    static let primary     = dynamic(light: 0x0F0F0F, dark: 0x34B58A)
+    static let onPrimary   = dynamic(light: 0xFFFFFF, dark: 0x08110D)
+    /// The system sheet draws its own scrim — this token is retained only for
+    /// any future overlay use; UISheetPresentationController ignores it.
+    static let scrim       = Color.black.opacity(0.32)
 
-    @Binding var image: UIImage?
+    /// Builds a SwiftUI `Color` whose concrete value depends on the current
+    /// `userInterfaceStyle`. Hex inputs are 0xRRGGBB.
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
+        })
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt32) {
+        let r = CGFloat((hex >> 16) & 0xFF) / 255
+        let g = CGFloat((hex >> 8) & 0xFF) / 255
+        let b = CGFloat(hex & 0xFF) / 255
+        self.init(red: r, green: g, blue: b, alpha: 1)
+    }
+}
+
+// MARK: - iOS 15 / 16 compatibility shims
+
+private extension View {
+    @ViewBuilder
+    func scrollContentBackgroundCompat() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollContentBackground(.hidden)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func scrollDismissesKeyboardCompat() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollDismissesKeyboard(.interactively)
+        } else {
+            self
+        }
+    }
+}
+
+private extension Text {
+    /// `Text.tracking(_:)` is iOS 16+. On iOS 15 the SDK ships without letter
+    /// spacing tweaks — visually subtle and not worth an AttributedString shim.
+    @ViewBuilder
+    func trackingCompat(_ value: CGFloat) -> some View {
+        if #available(iOS 16.0, *) {
+            self.tracking(value)
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - PHPickerViewController wrapper
+
+/// Multi-image picker that works on iOS 15+ via `PHPickerViewController`.
+/// SwiftUI's `PhotosPicker` would be simpler but is iOS 16+.
+private struct PhotoPickerSheet: UIViewControllerRepresentable {
+    let selectionLimit: Int
+    let onPicked: ([UIImage]) -> Void
+
     @Environment(\.presentationMode) private var presentationMode
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration(photoLibrary: .shared())
+        config.filter = .images
+        config.selectionLimit = selectionLimit
+        let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
-        picker.sourceType = .photoLibrary
         return picker
     }
 
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
-        // No updates needed
-    }
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: ImagePicker
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        private let parent: PhotoPickerSheet
 
-        init(_ parent: ImagePicker) {
+        init(_ parent: PhotoPickerSheet) {
             self.parent = parent
         }
 
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let image = info[.originalImage] as? UIImage {
-                parent.image = image
-            }
-            parent.presentationMode.wrappedValue.dismiss()
-        }
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            guard !results.isEmpty else { return }
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.presentationMode.wrappedValue.dismiss()
+            let group = DispatchGroup()
+            var images: [(Int, UIImage)] = []
+            let lock = NSLock()
+
+            for (index, result) in results.enumerated() {
+                let provider = result.itemProvider
+                guard provider.canLoadObject(ofClass: UIImage.self) else { continue }
+                group.enter()
+                provider.loadObject(ofClass: UIImage.self) { object, _ in
+                    defer { group.leave() }
+                    if let image = object as? UIImage {
+                        lock.lock()
+                        images.append((index, image))
+                        lock.unlock()
+                    }
+                }
+            }
+
+            group.notify(queue: .main) { [parent] in
+                let ordered = images.sorted { $0.0 < $1.0 }.map { $0.1 }
+                parent.onPicked(ordered)
+            }
         }
     }
 }
@@ -396,35 +656,6 @@ internal struct ImagePicker: UIViewControllerRepresentable {
 
 struct BugReportView_Previews: PreviewProvider {
     static var previews: some View {
-        BugReportView(onDismiss: {})
-    }
-}
-
-// MARK: - Color Extension
-
-private extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 3: // RGB (12-bit)
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (1, 1, 1, 0)
-        }
-
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255,
-            opacity: Double(a) / 255
-        )
+        BugReportView(viewModel: BugReportViewModel(onDismiss: {}))
     }
 }

@@ -46,4 +46,28 @@ enum TestHelpers {
             ctx.fill(CGRect(origin: .zero, size: size))
         }
     }
+
+    /// Renders an image with a specific pixel size and scale, mimicking a
+    /// real device screenshot (e.g. 1179×2556 px at scale 3). Use this when
+    /// the test cares about pixel-vs-point distinctions — `solidImage`'s
+    /// renderer defaults to `UIScreen.main.scale`, which varies by simulator.
+    static func retinaImage(
+        pixelWidth: Int,
+        pixelHeight: Int,
+        scale: CGFloat,
+        color: UIColor = .blue
+    ) -> UIImage {
+        let pointSize = CGSize(
+            width: CGFloat(pixelWidth) / scale,
+            height: CGFloat(pixelHeight) / scale
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: pointSize, format: format)
+        return renderer.image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(origin: .zero, size: pointSize))
+        }
+    }
 }

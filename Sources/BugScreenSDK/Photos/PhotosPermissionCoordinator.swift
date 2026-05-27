@@ -39,14 +39,14 @@ internal enum PhotosPermissionCoordinator {
         completion: @escaping (Outcome) -> Void
     ) {
         let alert = UIAlertController(
-            title: "Attach the full screenshot?",
-            message: "Allow photo library access so BugScreen can attach the exact screenshot you just took — including the status bar and other system chrome. Without access, only the app's content is captured. On the next screen, please tap \"Allow Access to All Photos\".",
+            title: SDKStrings.photosPermissionTitle,
+            message: SDKStrings.photosPermissionMessage,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Not now", style: .cancel) { _ in
+        alert.addAction(UIAlertAction(title: SDKStrings.photosPermissionNotNow, style: .cancel) { _ in
             completion(.cancelled)
         })
-        alert.addAction(UIAlertAction(title: "Continue", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: SDKStrings.photosPermissionContinue, style: .default) { _ in
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
                 DispatchQueue.main.async {
                     switch status {

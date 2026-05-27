@@ -17,11 +17,21 @@ public struct BugReportResponse: Codable, Sendable {
     /// Example: `["https://github.com/example/repo/issues/123"]`
     public let issueURLs: [String]
 
+    /// Integrations that failed to receive the report. Only present when at
+    /// least one integration succeeded and at least one failed.
+    public let partialFailures: [BugReportPartialFailure]?
+
     enum CodingKeys: String, CodingKey {
         case success
         case message
         case issueURLs = "issueUrls"
+        case partialFailures
     }
+}
+
+public struct BugReportPartialFailure: Codable, Sendable {
+    public let type: String
+    public let message: String
 }
 
 // MARK: - Error Response
@@ -39,9 +49,14 @@ struct ErrorResponse: Codable, Sendable {
     /// HTTP status code
     let statusCode: Int
 
+    /// Stable machine-readable error code (e.g. `validation.description`,
+    /// `auth.invalid_key`). Used by the SDK to map errors to user-facing copy.
+    let code: String?
+
     enum CodingKeys: String, CodingKey {
         case error
         case message
         case statusCode
+        case code
     }
 }
