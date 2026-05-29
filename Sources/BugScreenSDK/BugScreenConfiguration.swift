@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Immutable to ensure thread-safety and predictable behavior. Not exposed publicly —
 /// consumers configure the SDK via the parameters on `BugScreenSDK.configure(...)`.
-internal struct BugScreenConfiguration: Sendable {
+struct BugScreenConfiguration {
     let apiKey: String
     let enableScreenshotDetection: Bool
     let debug: Bool

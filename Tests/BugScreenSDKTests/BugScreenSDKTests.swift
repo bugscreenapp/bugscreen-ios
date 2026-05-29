@@ -1,10 +1,9 @@
-import XCTest
 @testable import BugScreenSDK
+import XCTest
 
 /// Tests for BugScreenSDK configuration and initialization.
 @MainActor
 final class BugScreenSDKTests: XCTestCase {
-
     override func setUp() {
         super.setUp()
         TestHelpers.resetSDK()
@@ -201,5 +200,4 @@ final class BugScreenSDKTests: XCTestCase {
             ["env": "production", "buildType": "debug", "plan": "pro"]
         )
     }
-
 }

@@ -4,17 +4,16 @@ import Foundation
 /// requests. Install on a `URLSessionConfiguration` via `protocolClasses` and
 /// reset between tests.
 final class StubURLProtocol: URLProtocol {
-
     typealias Handler = (URLRequest) throws -> (HTTPURLResponse, Data)
 
     static var handler: Handler?
 
     /// All requests the SDK sent to this protocol, in order.
-    static private(set) var recordedRequests: [URLRequest] = []
+    private(set) static var recordedRequests: [URLRequest] = []
 
     /// All bodies the SDK sent. URLProtocol does not expose `httpBodyStream`-
     /// sourced bodies via `request.httpBody`, so this captures both.
-    static private(set) var recordedBodies: [Data] = []
+    private(set) static var recordedBodies: [Data] = []
 
     static func reset() {
         handler = nil
@@ -22,9 +21,13 @@ final class StubURLProtocol: URLProtocol {
         recordedBodies = []
     }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
 
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
         let body = StubURLProtocol.collectBody(from: request)
@@ -67,7 +70,6 @@ final class StubURLProtocol: URLProtocol {
 }
 
 extension StubURLProtocol {
-
     /// Builds a `URLSession` whose only protocol class is this stub.
     static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral

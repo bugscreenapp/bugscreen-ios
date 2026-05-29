@@ -1,13 +1,13 @@
-import UIKit
 import SwiftUI
+import UIKit
 
 /// UIKit bridge for presenting the SwiftUI bug report view as a native bottom
 /// sheet via `UISheetPresentationController` — same role as Android's
 /// `ModalBottomSheet`. UIKit owns the scrim, slide animation, drag-to-dismiss,
 /// and grabber; the SwiftUI view renders only the form content.
-internal class BugReportHostingController: UIHostingController<BugReportView>,
-                                            UIAdaptivePresentationControllerDelegate {
-
+class BugReportHostingController: UIHostingController<BugReportView>,
+    UIAdaptivePresentationControllerDelegate
+{
     private let viewModel: BugReportViewModel
 
     init(
@@ -24,7 +24,7 @@ internal class BugReportHostingController: UIHostingController<BugReportView>,
             onDismiss: {},
             onSuccess: { _ in }
         )
-        self.viewModel = vm
+        viewModel = vm
         super.init(rootView: BugReportView(viewModel: vm))
 
         vm.bind(
@@ -32,9 +32,9 @@ internal class BugReportHostingController: UIHostingController<BugReportView>,
                 self?.dismiss(animated: true)
             },
             onSuccess: { [weak self] partials in
-                guard let self = self else { return }
-                let hostScene = self.view.window?.windowScene
-                self.dismiss(animated: true) {
+                guard let self else { return }
+                let hostScene = view.window?.windowScene
+                dismiss(animated: true) {
                     if let scene = hostScene {
                         SuccessToastPresenter.show(on: scene, partialFailures: partials)
                     }
@@ -53,18 +53,19 @@ internal class BugReportHostingController: UIHostingController<BugReportView>,
         presentationController?.delegate = self
     }
 
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+    @available(*, unavailable)
+    @MainActor dynamic required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     // MARK: - UIAdaptivePresentationControllerDelegate
 
-    func presentationControllerShouldDismiss(_ pc: UIPresentationController) -> Bool {
+    func presentationControllerShouldDismiss(_: UIPresentationController) -> Bool {
         if viewModel.submissionState == .submitting { return false }
         return !viewModel.isDirty
     }
 
-    func presentationControllerDidAttemptToDismiss(_ pc: UIPresentationController) {
+    func presentationControllerDidAttemptToDismiss(_: UIPresentationController) {
         guard viewModel.submissionState != .submitting else { return }
         presentDiscardConfirmation()
     }
@@ -119,7 +120,7 @@ private enum SuccessToastPresenter {
         // the clean success path stays at the short toast duration.
         let resolvedDuration =
             duration
-            ?? (partialFailures.isEmpty ? successToastSeconds : partialFailureToastSeconds)
+                ?? (partialFailures.isEmpty ? successToastSeconds : partialFailureToastSeconds)
         // If a previous toast is still on screen, replace it.
         activeWindow?.isHidden = true
         activeWindow = nil

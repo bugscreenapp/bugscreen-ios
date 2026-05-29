@@ -6,10 +6,10 @@ import UIKit
 /// Keys double as display labels rendered verbatim by the backend (GitHub
 /// markdown body, Jira ADF). Units are baked into the key where ambiguity is
 /// possible (`Screen Width (points)` vs `Screen Width (pixels)`).
-internal typealias BugReportMetadata = [String: Any]
+typealias BugReportMetadata = [String: Any]
 
 /// Wire keys for the metadata payload. Keys are human-readable display labels.
-internal enum MetadataKeys {
+enum MetadataKeys {
     static let device = "Device"
     static let manufacturer = "Manufacturer"
     static let model = "Model"
@@ -27,8 +27,7 @@ internal enum MetadataKeys {
     static let locale = "Locale"
 }
 
-internal enum MetadataCollector {
-
+enum MetadataCollector {
     static func collect(customData: [String: String]? = nil) -> BugReportMetadata {
         let bounds = UIScreen.main.bounds
         let nativeBounds = UIScreen.main.nativeBounds
@@ -48,9 +47,9 @@ internal enum MetadataCollector {
             MetadataKeys.screenScale: "\(UIScreen.main.scale)x",
             MetadataKeys.totalMemory: formatBytes(ProcessInfo.processInfo.physicalMemory),
             MetadataKeys.availableMemory: formatBytes(availableMemory()),
-            MetadataKeys.locale: Locale.current.identifier
+            MetadataKeys.locale: Locale.current.identifier,
         ]
-        if let customData = customData {
+        if let customData {
             for (key, value) in customData {
                 metadata[key] = value
             }
@@ -65,24 +64,22 @@ internal enum MetadataCollector {
         uname(&systemInfo)
 
         let mirror = Mirror(reflecting: systemInfo.machine)
-        let identifier = mirror.children.reduce("") { identifier, element in
+        return mirror.children.reduce("") { identifier, element in
             guard let value = element.value as? Int8, value != 0 else {
                 return identifier
             }
             return identifier + String(UnicodeScalar(UInt8(value)))
         }
-
-        return identifier
     }
 
     // MARK: - App Information
 
     private static func appVersion() -> String {
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
     }
 
     private static func buildNumber() -> String {
-        return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
     }
 
     // MARK: - System Information

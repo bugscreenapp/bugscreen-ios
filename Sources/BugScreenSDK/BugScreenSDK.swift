@@ -22,24 +22,23 @@ import UIKit
 /// ```
 @MainActor
 public enum BugScreenSDK {
-
     /// The version of the BugScreen SDK. Updated by the release process.
-    internal static let version: String = "1.1.0"
+    static let version: String = "1.1.1"
 
     // MARK: - Configuration
 
     /// Returns the current SDK configuration, if configured.
-    internal private(set) static var configuration: BugScreenConfiguration?
+    private(set) static var configuration: BugScreenConfiguration?
 
     /// Returns the internal logger instance (used by other SDK components)
-    internal private(set) static var logger: Logger?
+    private(set) static var logger: Logger?
 
     /// Returns the internal API client (used by the bug report UI submit adapter).
-    internal private(set) static var apiClient: APIClient?
+    private(set) static var apiClient: APIClient?
 
     /// Custom key/value pairs attached to every subsequent bug report.
     /// Defaults to empty; mutated only via ``setCustomData(_:)`` / ``clearCustomData()``.
-    internal private(set) static var customData: [String: String] = [:]
+    private(set) static var customData: [String: String] = [:]
 
     /// Returns whether the SDK has been configured.
     ///
@@ -221,7 +220,7 @@ public enum BugScreenSDK {
         presentBugReport(from: viewController, screenshot: screenshot, autoAttach: false)
     }
 
-    internal static func presentBugReport(
+    static func presentBugReport(
         from viewController: UIViewController?,
         screenshot: UIImage?,
         autoAttach: Bool
@@ -233,7 +232,7 @@ public enum BugScreenSDK {
 
         let presenter = viewController ?? topViewController()
 
-        guard let presenter = presenter else {
+        guard let presenter else {
             SDKLog.internalLog("⚠️ BugScreenSDK: Cannot present bug report - no view controller available", type: .error)
             return
         }
@@ -269,26 +268,26 @@ public enum BugScreenSDK {
     }
 
     #if DEBUG
-    /// Test-only seam that installs an `APIClient` wired to a caller-supplied
-    /// `URLSession` and `baseURL` (typically backed by a `URLProtocol` stub).
-    /// Compiled out of release builds.
-    ///
-    /// Bypasses the once-only guard in `configure()` so individual tests can
-    /// rebind the SDK without leaking state. Pair with `shutdown()` in tearDown.
-    internal static func configureForTesting(
-        apiKey: String,
-        baseURL: URL,
-        session: URLSession
-    ) {
-        SDKLog.setEnabled(false)
-        configuration = BugScreenConfiguration(
-            apiKey: apiKey,
-            enableScreenshotDetection: false,
-            debug: false
-        )
-        logger = Logger(enableConsoleLogging: false)
-        apiClient = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
-    }
+        /// Test-only seam that installs an `APIClient` wired to a caller-supplied
+        /// `URLSession` and `baseURL` (typically backed by a `URLProtocol` stub).
+        /// Compiled out of release builds.
+        ///
+        /// Bypasses the once-only guard in `configure()` so individual tests can
+        /// rebind the SDK without leaking state. Pair with `shutdown()` in tearDown.
+        static func configureForTesting(
+            apiKey: String,
+            baseURL: URL,
+            session: URLSession
+        ) {
+            SDKLog.setEnabled(false)
+            configuration = BugScreenConfiguration(
+                apiKey: apiKey,
+                enableScreenshotDetection: false,
+                debug: false
+            )
+            logger = Logger(enableConsoleLogging: false)
+            apiClient = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
+        }
     #endif
 
     // MARK: - Private Helpers
@@ -302,9 +301,9 @@ public enum BugScreenSDK {
     private static func validateAPIKey(_ apiKey: String) {
         if !apiKey.isEmpty, !apiKey.hasPrefix("fb_") {
             #if DEBUG
-            preconditionFailure("BugScreenSDK: API key must start with 'fb_'")
+                preconditionFailure("BugScreenSDK: API key must start with 'fb_'")
             #else
-            SDKLog.internalLog("⚠️ BugScreenSDK: API key should start with 'fb_'.", type: .error)
+                SDKLog.internalLog("⚠️ BugScreenSDK: API key should start with 'fb_'.", type: .error)
             #endif
         }
         if apiKey.isEmpty {
@@ -320,7 +319,7 @@ public enum BugScreenSDK {
     private static func topViewController() -> UIViewController? {
         let keyWindow = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
+            .flatMap(\.windows)
             .first { $0.isKeyWindow }
 
         var topController = keyWindow?.rootViewController

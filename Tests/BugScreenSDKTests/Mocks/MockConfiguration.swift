@@ -1,12 +1,11 @@
+@testable import BugScreenSDK
 import Foundation
 import UIKit
-@testable import BugScreenSDK
 
 /// Test utilities for BugScreen SDK unit tests.
 ///
 /// Provides helper methods and constants for testing SDK functionality.
 enum TestHelpers {
-
     /// Valid test API key
     static let validAPIKey = "fb_test_api_key_1234567890"
 
@@ -29,7 +28,7 @@ enum TestHelpers {
     static let sampleCustomData: [String: String] = [
         "userId": "12345",
         "screen": "TestView",
-        "featureFlag": "enabled"
+        "featureFlag": "enabled",
     ]
 
     /// Renders a small solid-colour image. Used by tests that need a real

@@ -5,12 +5,11 @@
 //  Created by BugScreen on 2025-01-15.
 //
 
-import XCTest
 @testable import BugScreenSDK
+import XCTest
 
 @available(iOS 15.0, *)
 final class ScreenshotObserverTests: XCTestCase {
-
     // MARK: - Setup & Teardown
 
     override func setUp() {
@@ -121,12 +120,12 @@ final class ScreenshotObserverTests: XCTestCase {
     func testConcurrentStartStopOperations() {
         // Given
         let observer = ScreenshotObserver.shared
-        let expectation = self.expectation(description: "Concurrent operations complete")
+        let expectation = expectation(description: "Concurrent operations complete")
         expectation.expectedFulfillmentCount = 10
         let queue = DispatchQueue(label: "test.concurrent", attributes: .concurrent)
 
         // When - Perform concurrent start/stop operations
-        for i in 0..<10 {
+        for i in 0 ..< 10 {
             queue.async {
                 if i % 2 == 0 {
                     observer.startObserving()
@@ -163,7 +162,7 @@ final class ScreenshotObserverTests: XCTestCase {
         )
 
         // Wait a bit for notification to be processed
-        let expectation = self.expectation(description: "Notification processed")
+        let expectation = expectation(description: "Notification processed")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             expectation.fulfill()
         }

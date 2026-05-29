@@ -1,5 +1,5 @@
-import XCTest
 @testable import BugScreenSDK
+import XCTest
 
 /// Tests for `APIClient` networking: multipart encoding of outgoing report
 /// bodies, validation short-circuits, and response handling for 201/4xx/5xx.
@@ -7,7 +7,6 @@ import XCTest
 /// response deterministic — no live network, no timeouts.
 @MainActor
 final class APIClientTests: XCTestCase {
-
     private let stubBaseURL = URL(string: "https://stub.bugscreen.test/")!
     private let apiKey = TestHelpers.validAPIKey
 
@@ -20,7 +19,7 @@ final class APIClientTests: XCTestCase {
             "device": "Apple iPhone15,2",
             "osVersion": "17.0",
             "appVersion": "1.0.0",
-            "customData": TestHelpers.sampleCustomData
+            "customData": TestHelpers.sampleCustomData,
         ]
     }
 
@@ -28,7 +27,7 @@ final class APIClientTests: XCTestCase {
         let payload: [String: Any] = [
             "success": true,
             "message": "ok",
-            "issueUrls": issueUrls
+            "issueUrls": issueUrls,
         ]
         let body = try! JSONSerialization.data(withJSONObject: payload)
         stubStatus(201, body: body)
@@ -76,7 +75,7 @@ final class APIClientTests: XCTestCase {
         stubSuccess()
         let metadata: BugReportMetadata = [
             "device": "Apple iPhone15,2",
-            "appVersion": "1.2.3"
+            "appVersion": "1.2.3",
         ]
         _ = try await makeClient().submitBugReport(
             description: "ignored",
@@ -116,7 +115,7 @@ final class APIClientTests: XCTestCase {
         let images = [
             TestHelpers.solidImage(color: .red),
             TestHelpers.solidImage(color: .green),
-            TestHelpers.solidImage(color: .blue)
+            TestHelpers.solidImage(color: .blue),
         ]
         _ = try await makeClient().submitBugReport(
             description: "shots",
@@ -125,7 +124,7 @@ final class APIClientTests: XCTestCase {
         )
 
         let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
-        for index in 1...images.count {
+        for index in 1 ... images.count {
             XCTAssertTrue(
                 body.contains(utf8Bytes: "name=\"screenshot\"; filename=\"screenshot-\(index).jpg\""),
                 "Expected multipart part for screenshot-\(index)"
@@ -135,7 +134,7 @@ final class APIClientTests: XCTestCase {
 
     func testScreenshotsCapAtFourEvenIfMorePassed() async throws {
         stubSuccess()
-        let images = (1...6).map { _ in TestHelpers.solidImage() }
+        let images = (1 ... 6).map { _ in TestHelpers.solidImage() }
         _ = try await makeClient().submitBugReport(
             description: "shots",
             metadata: sampleMetadata(),
@@ -143,7 +142,7 @@ final class APIClientTests: XCTestCase {
         )
 
         let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
-        for index in 1...4 {
+        for index in 1 ... 4 {
             XCTAssertTrue(body.contains(utf8Bytes: "filename=\"screenshot-\(index).jpg\""))
         }
         XCTAssertFalse(body.contains(utf8Bytes: "filename=\"screenshot-5"))
@@ -343,8 +342,8 @@ final class APIClientTests: XCTestCase {
         }
     }
 
-    // Locks the fallback at `APIClient.submitBugReport` where an undecodable
-    // error body falls through to `.httpError(status:, code: nil, message: nil)`.
+    /// Locks the fallback at `APIClient.submitBugReport` where an undecodable
+    /// error body falls through to `.httpError(status:, code: nil, message: nil)`.
     func test500WithUndecodableBodyThrowsHTTPError() async {
         stubStatus(500, body: Data())
         await XCTAssertThrowsErrorAsync(
@@ -416,7 +415,7 @@ final class APIClientTests: XCTestCase {
         let payload: [String: Any] = [
             "error": error,
             "message": message,
-            "statusCode": statusCode
+            "statusCode": statusCode,
         ]
         return try! JSONSerialization.data(withJSONObject: payload)
     }
@@ -428,14 +427,14 @@ final class APIClientTests: XCTestCase {
         guard let text = String(data: body, encoding: .utf8) else { return nil }
         let marker = "name=\"\(name)\""
         guard let nameRange = text.range(of: marker) else { return nil }
-        guard let headerEnd = text.range(of: "\r\n\r\n", range: nameRange.upperBound..<text.endIndex) else {
+        guard let headerEnd = text.range(of: "\r\n\r\n", range: nameRange.upperBound ..< text.endIndex) else {
             return nil
         }
         let afterHeader = headerEnd.upperBound
-        guard let nextBoundary = text.range(of: "\r\n--", range: afterHeader..<text.endIndex) else {
+        guard let nextBoundary = text.range(of: "\r\n--", range: afterHeader ..< text.endIndex) else {
             return nil
         }
-        let part = text[afterHeader..<nextBoundary.lowerBound]
+        let part = text[afterHeader ..< nextBoundary.lowerBound]
         return part.data(using: .utf8)
     }
 }
@@ -443,7 +442,6 @@ final class APIClientTests: XCTestCase {
 // MARK: - Response Model Tests
 
 final class APIModelsTests: XCTestCase {
-
     func testBugReportResponseDecoding() throws {
         let json = """
         {
@@ -455,7 +453,7 @@ final class APIModelsTests: XCTestCase {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try XCTUnwrap(json.data(using: .utf8))
         let decoder = JSONDecoder()
         let response = try decoder.decode(BugReportResponse.self, from: data)
 
@@ -477,7 +475,7 @@ final class APIModelsTests: XCTestCase {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try XCTUnwrap(json.data(using: .utf8))
         let decoder = JSONDecoder()
         let response = try decoder.decode(BugReportResponse.self, from: data)
 
@@ -494,7 +492,7 @@ final class APIModelsTests: XCTestCase {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try XCTUnwrap(json.data(using: .utf8))
         let decoder = JSONDecoder()
         let response = try decoder.decode(ErrorResponse.self, from: data)
 
@@ -512,7 +510,7 @@ final class APIModelsTests: XCTestCase {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try XCTUnwrap(json.data(using: .utf8))
         let decoder = JSONDecoder()
         let response = try decoder.decode(ErrorResponse.self, from: data)
 
@@ -531,7 +529,7 @@ final class APIModelsTests: XCTestCase {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try XCTUnwrap(json.data(using: .utf8))
         let response = try JSONDecoder().decode(ErrorResponse.self, from: data)
         XCTAssertEqual(response.statusCode, 500)
         XCTAssertEqual(response.code, "integrations.all_failed")
@@ -556,7 +554,6 @@ final class APIModelsTests: XCTestCase {
 /// (UI submit, screenshot detection) depend on.
 @MainActor
 final class APIClientConfigurationTests: XCTestCase {
-
     override func setUp() {
         super.setUp()
         StubURLProtocol.reset()
@@ -569,7 +566,7 @@ final class APIClientConfigurationTests: XCTestCase {
     }
 
     func testConfigureForTestingInstallsClientThatHitsStubbedSession() async throws {
-        let stubURL = URL(string: "https://stub-a.bugscreen.test/")!
+        let stubURL = try XCTUnwrap(URL(string: "https://stub-a.bugscreen.test/"))
         BugScreenSDK.configureForTesting(
             apiKey: TestHelpers.validAPIKey,
             baseURL: stubURL,
@@ -592,12 +589,12 @@ final class APIClientConfigurationTests: XCTestCase {
     func testReconfigureForTestingReplacesPreviousClient() async throws {
         BugScreenSDK.configureForTesting(
             apiKey: TestHelpers.validAPIKey,
-            baseURL: URL(string: "https://stub-a.bugscreen.test/")!,
+            baseURL: try XCTUnwrap(URL(string: "https://stub-a.bugscreen.test/")),
             session: StubURLProtocol.makeSession()
         )
         BugScreenSDK.configureForTesting(
             apiKey: TestHelpers.validAPIKey,
-            baseURL: URL(string: "https://stub-b.bugscreen.test/")!,
+            baseURL: try XCTUnwrap(URL(string: "https://stub-b.bugscreen.test/")),
             session: StubURLProtocol.makeSession()
         )
 
@@ -633,8 +630,8 @@ private extension Data {
 /// a tiny shim that awaits an autoclosure and routes thrown errors into the
 /// caller's handler. The handler is required so a missing one can't silently
 /// pass any thrown error.
-private func XCTAssertThrowsErrorAsync<T>(
-    _ expression: @autoclosure () async throws -> T,
+private func XCTAssertThrowsErrorAsync(
+    _ expression: @autoclosure () async throws -> some Any,
     file: StaticString = #filePath,
     line: UInt = #line,
     _ errorHandler: (Error) -> Void

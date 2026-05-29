@@ -1,13 +1,12 @@
+@testable import BugScreenSDK
 import Foundation
 import XCTest
-@testable import BugScreenSDK
 
 /// Verifies the user-facing message routing for `BugScreenSDKError`. The exact
 /// localized text is owned by `Localizable.xcstrings` — these tests check that
 /// each case + backend `code` is mapped to the right bucket (config vs server
 /// vs validation) and that technical details are preserved for "Show details".
 final class BugScreenSDKErrorTests: XCTestCase {
-
     func test_notConfigured_routesToConfigMessage() {
         let error = BugScreenSDKError.notConfigured
         XCTAssertEqual(error.userMessage, SDKStrings.errorConfig)

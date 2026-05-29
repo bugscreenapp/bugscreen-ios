@@ -4,7 +4,7 @@ import UIKit
 /// Submits a bug report through the SDK. The production adapter calls the
 /// internal `APIClient`; tests provide a fake so the view model can be
 /// exercised without configuring the SDK.
-internal protocol BugReportSubmitting {
+protocol BugReportSubmitting {
     @MainActor
     func submitBugReport(
         description: String,
@@ -17,7 +17,7 @@ internal protocol BugReportSubmitting {
 /// Requests photo-library access, presenting a rationale if needed. The
 /// production adapter forwards to `PhotosPermissionCoordinator.ensureAccess`.
 /// Callers invoke this on the main actor.
-internal protocol PhotosPermissionRequesting {
+protocol PhotosPermissionRequesting {
     @MainActor
     func ensureAccess(
         presenter: UIViewController,
@@ -28,7 +28,7 @@ internal protocol PhotosPermissionRequesting {
 /// Locates the user's most recent screenshot from the photo library. The
 /// production adapter forwards to `ScreenshotLocator.findLatestScreenshot`.
 /// Implementations must invoke `completion` on the main queue.
-internal protocol ScreenshotLocating {
+protocol ScreenshotLocating {
     func findLatestScreenshot(
         since: Date,
         completion: @escaping (UIImage?) -> Void
@@ -37,7 +37,7 @@ internal protocol ScreenshotLocating {
 
 // MARK: - Production adapters
 
-internal struct DefaultBugReportSubmitter: BugReportSubmitting {
+struct DefaultBugReportSubmitter: BugReportSubmitting {
     @MainActor
     func submitBugReport(
         description: String,
@@ -64,7 +64,7 @@ internal struct DefaultBugReportSubmitter: BugReportSubmitting {
             logFile: logFile
         )
 
-        if let logFile = logFile {
+        if let logFile {
             try? FileManager.default.removeItem(at: logFile)
         }
 
@@ -72,7 +72,7 @@ internal struct DefaultBugReportSubmitter: BugReportSubmitting {
     }
 }
 
-internal struct DefaultPhotosPermissionRequester: PhotosPermissionRequesting {
+struct DefaultPhotosPermissionRequester: PhotosPermissionRequesting {
     @MainActor
     func ensureAccess(
         presenter: UIViewController,
@@ -82,7 +82,7 @@ internal struct DefaultPhotosPermissionRequester: PhotosPermissionRequesting {
     }
 }
 
-internal struct DefaultScreenshotLocator: ScreenshotLocating {
+struct DefaultScreenshotLocator: ScreenshotLocating {
     func findLatestScreenshot(
         since: Date,
         completion: @escaping (UIImage?) -> Void

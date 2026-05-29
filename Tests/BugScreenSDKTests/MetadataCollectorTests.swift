@@ -1,9 +1,8 @@
-import XCTest
 @testable import BugScreenSDK
+import XCTest
 
 /// Tests for MetadataCollector functionality.
 final class MetadataCollectorTests: XCTestCase {
-
     // MARK: - Basic Collection Tests
 
     func testCollectMetadataReturnsDictionary() {
@@ -23,12 +22,12 @@ final class MetadataCollectorTests: XCTestCase {
 
     // MARK: - Device Information Tests
 
-    func testDeviceFieldNotEmpty() {
+    func testDeviceFieldNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let device = metadata[MetadataKeys.device] as? String
         XCTAssertNotNil(device)
-        XCTAssertFalse(device!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(device?.isEmpty))
     }
 
     func testManufacturerIsApple() {
@@ -37,61 +36,61 @@ final class MetadataCollectorTests: XCTestCase {
         XCTAssertEqual(metadata[MetadataKeys.manufacturer] as? String, "Apple")
     }
 
-    func testModelFieldNotEmpty() {
+    func testModelFieldNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let model = metadata[MetadataKeys.model] as? String
         XCTAssertNotNil(model)
-        XCTAssertFalse(model!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(model?.isEmpty))
     }
 
-    func testOSVersionNotEmpty() {
+    func testOSVersionNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let osVersion = metadata[MetadataKeys.osVersion] as? String
         XCTAssertNotNil(osVersion)
-        XCTAssertFalse(osVersion!.isEmpty)
-        XCTAssertTrue(osVersion!.contains("."))
+        XCTAssertFalse(try XCTUnwrap(osVersion?.isEmpty))
+        XCTAssertTrue(try XCTUnwrap(osVersion?.contains(".")))
     }
 
     // MARK: - App Information Tests
 
-    func testAppVersionNotEmpty() {
+    func testAppVersionNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let appVersion = metadata[MetadataKeys.appVersion] as? String
         XCTAssertNotNil(appVersion)
-        XCTAssertFalse(appVersion!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(appVersion?.isEmpty))
     }
 
-    func testAppBuildNumberNotEmpty() {
+    func testAppBuildNumberNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let appBuildNumber = metadata[MetadataKeys.appBuildNumber] as? String
         XCTAssertNotNil(appBuildNumber)
-        XCTAssertFalse(appBuildNumber!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(appBuildNumber?.isEmpty))
     }
 
-    func testBundleIdentifierNotEmpty() {
+    func testBundleIdentifierNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let bundleIdentifier = metadata[MetadataKeys.bundleIdentifier] as? String
         XCTAssertNotNil(bundleIdentifier)
-        XCTAssertFalse(bundleIdentifier!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(bundleIdentifier?.isEmpty))
     }
 
     // MARK: - Display Information Tests
 
-    func testScreenScaleFormat() {
+    func testScreenScaleFormat() throws {
         let metadata = MetadataCollector.collect()
 
         let screenScale = metadata[MetadataKeys.screenScale] as? String
         XCTAssertNotNil(screenScale)
-        XCTAssertTrue(screenScale!.hasSuffix("x"))
-        XCTAssertTrue(screenScale!.contains("."))
+        XCTAssertTrue(try XCTUnwrap(screenScale?.hasSuffix("x")))
+        XCTAssertTrue(try XCTUnwrap(screenScale?.contains(".")))
     }
 
-    func testScreenDimensionsPositive() {
+    func testScreenDimensionsPositive() throws {
         let metadata = MetadataCollector.collect()
 
         let widthPoints = metadata[MetadataKeys.screenWidthPoints] as? Int
@@ -102,36 +101,36 @@ final class MetadataCollectorTests: XCTestCase {
         XCTAssertNotNil(heightPoints)
         XCTAssertNotNil(widthPixels)
         XCTAssertNotNil(heightPixels)
-        XCTAssertGreaterThan(widthPoints!, 0)
-        XCTAssertGreaterThan(heightPoints!, 0)
-        XCTAssertGreaterThanOrEqual(widthPixels!, widthPoints!)
-        XCTAssertGreaterThanOrEqual(heightPixels!, heightPoints!)
+        XCTAssertGreaterThan(try XCTUnwrap(widthPoints), 0)
+        XCTAssertGreaterThan(try XCTUnwrap(heightPoints), 0)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(widthPixels), try XCTUnwrap(widthPoints))
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(heightPixels), try XCTUnwrap(heightPoints))
     }
 
     // MARK: - System Information Tests
 
-    func testTotalMemoryFormatted() {
+    func testTotalMemoryFormatted() throws {
         let metadata = MetadataCollector.collect()
 
         let totalMemory = metadata[MetadataKeys.totalMemory] as? String
         XCTAssertNotNil(totalMemory)
-        XCTAssertFalse(totalMemory!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(totalMemory?.isEmpty))
     }
 
-    func testAvailableMemoryFormatted() {
+    func testAvailableMemoryFormatted() throws {
         let metadata = MetadataCollector.collect()
 
         let available = metadata[MetadataKeys.availableMemory] as? String
         XCTAssertNotNil(available)
-        XCTAssertFalse(available!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(available?.isEmpty))
     }
 
-    func testLocaleNotEmpty() {
+    func testLocaleNotEmpty() throws {
         let metadata = MetadataCollector.collect()
 
         let locale = metadata[MetadataKeys.locale] as? String
         XCTAssertNotNil(locale)
-        XCTAssertFalse(locale!.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(locale?.isEmpty))
     }
 
     // MARK: - Field Presence
@@ -145,7 +144,7 @@ final class MetadataCollectorTests: XCTestCase {
             MetadataKeys.screenWidthPoints, MetadataKeys.screenHeightPoints,
             MetadataKeys.screenWidthPixels, MetadataKeys.screenHeightPixels,
             MetadataKeys.screenScale,
-            MetadataKeys.totalMemory, MetadataKeys.availableMemory, MetadataKeys.locale
+            MetadataKeys.totalMemory, MetadataKeys.availableMemory, MetadataKeys.locale,
         ]
         XCTAssertTrue(expected.isSubset(of: Set(metadata.keys)))
     }
@@ -177,7 +176,7 @@ final class MetadataCollectorTests: XCTestCase {
         let customData: [String: String] = [
             "key1": "value1",
             "key2": "value2",
-            "key3": "value3"
+            "key3": "value3",
         ]
         let metadata = MetadataCollector.collect(customData: customData)
 

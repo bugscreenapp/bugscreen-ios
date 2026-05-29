@@ -32,15 +32,15 @@ public enum LogLevel: Int, Comparable, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .verbose:
-            return "VERBOSE"
+            "VERBOSE"
         case .debug:
-            return "DEBUG"
+            "DEBUG"
         case .info:
-            return "INFO"
+            "INFO"
         case .warning:
-            return "WARN"
+            "WARN"
         case .error:
-            return "ERROR"
+            "ERROR"
         }
     }
 
@@ -48,20 +48,20 @@ public enum LogLevel: Int, Comparable, CaseIterable, Sendable {
     var osLogType: OSLogType {
         switch self {
         case .verbose:
-            return .debug
+            .debug
         case .debug:
-            return .debug
+            .debug
         case .info:
-            return .info
+            .info
         case .warning:
-            return .default
+            .default
         case .error:
-            return .error
+            .error
         }
     }
 
     /// Comparable conformance for filtering logs by level
     public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
-        return lhs.rawValue < rhs.rawValue
+        lhs.rawValue < rhs.rawValue
     }
 }

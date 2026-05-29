@@ -1,13 +1,12 @@
+import Combine
 import Foundation
 import UIKit
-import Combine
 
 /// ViewModel for the bug report UI.
 ///
 /// Manages form state, validation, and submission logic for the bug report screen.
 @MainActor
-internal final class BugReportViewModel: ObservableObject {
-
+final class BugReportViewModel: ObservableObject {
     // MARK: - Published Properties
 
     /// User's description of the bug (1-10000 characters)
@@ -90,21 +89,21 @@ internal final class BugReportViewModel: ObservableObject {
         photosPermission: PhotosPermissionRequesting = DefaultPhotosPermissionRequester(),
         screenshotLocator: ScreenshotLocating = DefaultScreenshotLocator()
     ) {
-        if let screenshot = screenshot {
-            self.screenshots = [screenshot]
+        if let screenshot {
+            screenshots = [screenshot]
             // Only treat the initial shot as an upgradeable placeholder when
             // auto-attach is on. Without auto-attach the caller supplied a
             // deliberate screenshot we must not silently replace.
             if autoAttach {
-                self.placeholderIndex = 0
+                placeholderIndex = 0
             }
         }
         self.autoAttach = autoAttach
-        self.autoAttachSince = Date()
+        autoAttachSince = Date()
         self.onDismiss = onDismiss
         self.onSuccess = onSuccess
         let customData = BugScreenSDK.customData
-        self.metadata = MetadataCollector.collect(customData: customData.isEmpty ? nil : customData)
+        metadata = MetadataCollector.collect(customData: customData.isEmpty ? nil : customData)
         self.submitter = submitter
         self.photosPermission = photosPermission
         self.screenshotLocator = screenshotLocator
@@ -244,7 +243,7 @@ internal final class BugReportViewModel: ObservableObject {
         guard let presenter else { return }
         // When a placeholder exists, we always have room to upgrade it even if
         // the list is at the cap. Otherwise require a free slot to append.
-        if placeholderIndex == nil && !canAddMoreScreenshots { return }
+        if placeholderIndex == nil, !canAddMoreScreenshots { return }
 
         let since = autoAttachSince
         photosPermission.ensureAccess(presenter: presenter) { [weak self] outcome in
@@ -306,14 +305,19 @@ internal final class BugReportViewModel: ObservableObject {
         case ui
         case crash
 
-        var id: String { rawValue }
-        var apiValue: String { rawValue }
+        var id: String {
+            rawValue
+        }
+
+        var apiValue: String {
+            rawValue
+        }
 
         var displayName: String {
             switch self {
-            case .bug:   return "Bug"
-            case .ui:    return "UI"
-            case .crash: return "Crash"
+            case .bug: "Bug"
+            case .ui: "UI"
+            case .crash: "Crash"
             }
         }
     }
@@ -326,14 +330,19 @@ internal final class BugReportViewModel: ObservableObject {
         case medium
         case high
 
-        var id: String { rawValue }
-        var apiValue: String { rawValue }
+        var id: String {
+            rawValue
+        }
+
+        var apiValue: String {
+            rawValue
+        }
 
         var displayName: String {
             switch self {
-            case .low:    return "Low"
-            case .medium: return "Medium"
-            case .high:   return "High"
+            case .low: "Low"
+            case .medium: "Medium"
+            case .high: "High"
             }
         }
     }

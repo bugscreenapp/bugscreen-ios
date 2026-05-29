@@ -1,9 +1,8 @@
-import UIKit
-import Photos
 import OSLog
+import Photos
+import UIKit
 
-internal enum ScreenshotLocator {
-
+enum ScreenshotLocator {
     private static let logger = OSLog(subsystem: "app.bugscreen.sdk", category: "ScreenshotLocator")
 
     static func findLatestScreenshot(

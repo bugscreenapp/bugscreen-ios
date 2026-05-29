@@ -8,8 +8,7 @@ import os.log
 /// reports to provide debugging context.
 ///
 /// All methods are thread-safe and can be called from any queue.
-internal final class Logger: @unchecked Sendable {
-
+final class Logger: @unchecked Sendable {
     // MARK: - Properties
 
     /// Maximum buffer size in bytes (1MB)
@@ -35,7 +34,7 @@ internal final class Logger: @unchecked Sendable {
         let level: LogLevel
         let message: String
 
-        // en_US_POSIX pins digit shaping so non-Latin device locales still emit ASCII digits.
+        /// en_US_POSIX pins digit shaping so non-Latin device locales still emit ASCII digits.
         private static let formatter: DateFormatter = {
             let f = DateFormatter()
             f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
@@ -86,7 +85,7 @@ internal final class Logger: @unchecked Sendable {
         currentSizeBytes += entry.sizeBytes
 
         // Prune old entries if over limit
-        while currentSizeBytes > maxSizeBytes && !entries.isEmpty {
+        while currentSizeBytes > maxSizeBytes, !entries.isEmpty {
             let removed = entries.removeFirst()
             currentSizeBytes -= removed.sizeBytes
         }
@@ -116,7 +115,7 @@ internal final class Logger: @unchecked Sendable {
         defer { lock.unlock() }
 
         // Join all formatted entries with newlines
-        let content = entries.map { $0.formatted }.joined(separator: "\n")
+        let content = entries.map(\.formatted).joined(separator: "\n")
 
         // Create temporary file
         let tempDir = FileManager.default.temporaryDirectory
@@ -166,23 +165,24 @@ internal final class Logger: @unchecked Sendable {
         defer { lock.unlock() }
         return currentSizeBytes
     }
-
 }
 
 // MARK: - Testing Support
 
 #if DEBUG
-extension Logger {
-    /// Returns all log entries (for testing only).
-    ///
-    /// This method is only available in debug builds for unit testing.
-    func allEntries() -> [LogEntry] {
-        lock.lock()
-        defer { lock.unlock() }
-        return entries
-    }
+    extension Logger {
+        /// Returns all log entries (for testing only).
+        ///
+        /// This method is only available in debug builds for unit testing.
+        func allEntries() -> [LogEntry] {
+            lock.lock()
+            defer { lock.unlock() }
+            return entries
+        }
 
-    /// Returns whether console mirroring is enabled (for testing only).
-    var consoleLoggingEnabled: Bool { enableConsoleLogging }
-}
+        /// Returns whether console mirroring is enabled (for testing only).
+        var consoleLoggingEnabled: Bool {
+            enableConsoleLogging
+        }
+    }
 #endif

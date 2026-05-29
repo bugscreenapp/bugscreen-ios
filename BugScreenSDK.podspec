@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'BugScreenSDK'
-  s.version          = '1.1.0'
+  s.version          = '1.1.1'
   s.summary          = 'Turn screenshots into bug reports in your issue tracker.'
   s.description      = <<-DESC
     BugScreen detects screenshots in your iOS app and lets users file a bug
@@ -18,11 +18,16 @@ Pod::Spec.new do |s|
 
   s.source_files = 'Sources/BugScreenSDK/**/*.swift'
 
-  s.resources = ['Sources/BugScreenSDK/Resources/PrivacyInfo.xcprivacy']
-
+  # PrivacyInfo.xcprivacy must ship inside a sub-bundle (resource_bundles),
+  # not via s.resources. s.resources copies the manifest to the consumer
+  # app's .app root and collides with the app target's own PrivacyInfo —
+  # Xcode fails with "Multiple commands produce .../<App>.app/PrivacyInfo.xcprivacy".
+  # Apple's submission tooling aggregates manifests from sub-bundles, so
+  # privacy compliance is unchanged.
   s.resource_bundles = {
     'BugScreenSDK' => [
-      'Sources/BugScreenSDK/Resources/Localizable.xcstrings'
+      'Sources/BugScreenSDK/Resources/Localizable.xcstrings',
+      'Sources/BugScreenSDK/Resources/PrivacyInfo.xcprivacy'
     ]
   }
 end

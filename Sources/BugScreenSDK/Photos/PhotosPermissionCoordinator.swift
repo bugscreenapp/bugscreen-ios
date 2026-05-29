@@ -1,10 +1,9 @@
-import UIKit
-import Photos
 import OSLog
+import Photos
+import UIKit
 
 @MainActor
-internal enum PhotosPermissionCoordinator {
-
+enum PhotosPermissionCoordinator {
     private static let logger = OSLog(subsystem: "app.bugscreen.sdk", category: "PhotosPermission")
 
     /// Result of the permission flow.

@@ -5,8 +5,7 @@ import UIKit
 ///
 /// Handles multipart form-data uploads, authentication, and error handling.
 /// All methods are async and throw errors for proper error propagation.
-internal final class APIClient {
-
+final class APIClient {
     // MARK: - Properties
 
     /// API key for authentication (sent as Bearer token)
@@ -39,7 +38,7 @@ internal final class APIClient {
 
     private static func makeDefaultSession() -> URLSession {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30  // 30 seconds for request
+        config.timeoutIntervalForRequest = 30 // 30 seconds for request
         config.timeoutIntervalForResource = 60 // 60 seconds for upload
         return URLSession(configuration: config)
     }
@@ -76,7 +75,7 @@ internal final class APIClient {
         logFile: URL? = nil
     ) async throws -> BugReportResponse {
         // Validate description length
-        guard !description.isEmpty && description.count <= 10000 else {
+        guard !description.isEmpty, description.count <= 10000 else {
             throw BugScreenSDKError.invalidArgument("Description must be between 1 and 10000 characters")
         }
 
@@ -199,14 +198,14 @@ internal final class APIClient {
         body.append(metadataJSON)
         body.append("\r\n")
 
-        if let type = type {
+        if let type {
             body.append("--\(boundary)\r\n")
             body.append("Content-Disposition: form-data; name=\"type\"\r\n")
             body.append("Content-Type: text/plain\r\n\r\n")
             body.append("\(type)\r\n")
         }
 
-        if let severity = severity {
+        if let severity {
             body.append("--\(boundary)\r\n")
             body.append("Content-Disposition: form-data; name=\"severity\"\r\n")
             body.append("Content-Type: text/plain\r\n\r\n")
@@ -232,8 +231,9 @@ internal final class APIClient {
         }
 
         // Add log file (optional)
-        if let logFile = logFile,
-           let logData = try? Data(contentsOf: logFile) {
+        if let logFile,
+           let logData = try? Data(contentsOf: logFile)
+        {
             body.append("--\(boundary)\r\n")
             body.append("Content-Disposition: form-data; name=\"logFile\"; filename=\"logs.txt\"\r\n")
             body.append("Content-Type: text/plain\r\n\r\n")

@@ -39,7 +39,7 @@ public struct BugReportPartialFailure: Codable, Sendable {
 /// Error response from the bug reports API.
 ///
 /// Returned for 400 (Bad Request), 401 (Unauthorized), and 500 (Internal Server Error) responses.
-struct ErrorResponse: Codable, Sendable {
+struct ErrorResponse: Codable {
     /// Error type (e.g., "Bad Request", "Unauthorized", "Internal Server Error")
     let error: String
 

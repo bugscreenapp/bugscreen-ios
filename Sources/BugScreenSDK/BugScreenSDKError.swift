@@ -5,7 +5,7 @@ import Foundation
 /// Carries both a user-facing localized message (`userMessage`) and an optional
 /// `technicalDetail` that the UI reveals behind a "Show details" disclosure so
 /// the reporter can share specifics with the app's support team.
-internal enum BugScreenSDKError: LocalizedError, Sendable {
+enum BugScreenSDKError: LocalizedError {
     /// SDK has not been configured. Call `BugScreenSDK.configure()` first.
     case notConfigured
 
@@ -43,19 +43,19 @@ internal enum BugScreenSDKError: LocalizedError, Sendable {
     var userMessage: String {
         switch self {
         case .notConfigured, .invalidArgument, .invalidURL, .encodingError, .apiError:
-            return SDKStrings.errorConfig
+            SDKStrings.errorConfig
         case .invalidResponse:
-            return SDKStrings.errorServer
-        case .httpError(let status, let code, _):
-            return Self.userMessage(forStatus: status, code: code)
+            SDKStrings.errorServer
+        case let .httpError(status, code, _):
+            Self.userMessage(forStatus: status, code: code)
         case .cancelled:
-            return SDKStrings.errorServer
+            SDKStrings.errorServer
         case .offline:
-            return SDKStrings.errorOffline
+            SDKStrings.errorOffline
         case .timeout:
-            return SDKStrings.errorTimeout
+            SDKStrings.errorTimeout
         case .networkError:
-            return SDKStrings.errorServer
+            SDKStrings.errorServer
         }
     }
 
@@ -65,20 +65,20 @@ internal enum BugScreenSDKError: LocalizedError, Sendable {
         switch self {
         case .notConfigured:
             return "BugScreenSDK not configured. Call BugScreenSDK.configure() before using the SDK."
-        case .invalidArgument(let message):
+        case let .invalidArgument(message):
             return "Invalid argument: \(message)"
         case .invalidURL:
             return "Invalid API URL."
         case .invalidResponse:
             return "Server returned an invalid response."
-        case .httpError(let status, let code, let message):
+        case let .httpError(status, code, message):
             let parts = [
                 "HTTP \(status)",
                 code.map { "code=\($0)" },
-                message
+                message,
             ].compactMap { $0 }
             return parts.joined(separator: " · ")
-        case .apiError(let message):
+        case let .apiError(message):
             return "API error: \(message)"
         case .cancelled:
             return "Request cancelled."
@@ -86,7 +86,7 @@ internal enum BugScreenSDKError: LocalizedError, Sendable {
             return nil
         case .timeout:
             return nil
-        case .networkError(let error):
+        case let .networkError(error):
             return "Network error: \(error.localizedDescription)"
         case .encodingError:
             return "Failed to encode request data."
@@ -95,7 +95,9 @@ internal enum BugScreenSDKError: LocalizedError, Sendable {
 
     /// `LocalizedError` conformance — returns the user-facing copy by default
     /// so callers using `error.localizedDescription` get the user message.
-    var errorDescription: String? { userMessage }
+    var errorDescription: String? {
+        userMessage
+    }
 
     private static func userMessage(forStatus status: Int, code: String?) -> String {
         switch code {

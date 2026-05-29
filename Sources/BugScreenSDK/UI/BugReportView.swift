@@ -1,5 +1,5 @@
-import SwiftUI
 import PhotosUI
+import SwiftUI
 import UIKit
 
 /// SwiftUI view for submitting bug reports.
@@ -9,8 +9,7 @@ import UIKit
 /// (scrim, slide-in, drag-to-dismiss, detents, grabber) is owned by UIKit's
 /// `UISheetPresentationController` configured on `BugReportHostingController`;
 /// this view renders only the sheet's content.
-internal struct BugReportView: View {
-
+struct BugReportView: View {
     @ObservedObject private var viewModel: BugReportViewModel
 
     @State private var showPhotoPicker = false
@@ -86,7 +85,8 @@ internal struct BugReportView: View {
     private var footer: some View {
         VStack(spacing: 10) {
             if let error = viewModel.lastError,
-               viewModel.submissionState == .error {
+               viewModel.submissionState == .error
+            {
                 ErrorSnackbar(error: error)
             }
             CreateTicketButton(
@@ -116,8 +116,9 @@ internal struct BugReportView: View {
     private static func topPresentedViewController() -> UIViewController? {
         guard let scene = UIApplication.shared.connectedScenes
             .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
-              let keyWindow = scene.windows.first(where: { $0.isKeyWindow }),
-              var top = keyWindow.rootViewController else {
+            let keyWindow = scene.windows.first(where: { $0.isKeyWindow }),
+            var top = keyWindow.rootViewController
+        else {
             return nil
         }
         while let presented = top.presentedViewController {
@@ -273,9 +274,9 @@ private struct SeverityPill: View {
 
     private var dotColor: Color {
         switch severity {
-        case .low:    return Brand.sevLow
-        case .medium: return Brand.sevMed
-        case .high:   return Brand.sevHigh
+        case .low: Brand.sevLow
+        case .medium: Brand.sevMed
+        case .high: Brand.sevHigh
         }
     }
 }
@@ -433,7 +434,7 @@ private struct ErrorSnackbar: View {
 /// Success confirmation rendered after submit. Used by the SwiftUI sheet
 /// content during the success state and by `SuccessToastPresenter` for the
 /// transient post-dismiss window.
-internal struct SuccessToast: View {
+struct SuccessToast: View {
     let partialFailures: [BugReportPartialFailure]
     @State private var detailsVisible = false
 
@@ -441,7 +442,9 @@ internal struct SuccessToast: View {
         self.partialFailures = partialFailures
     }
 
-    private var hasPartials: Bool { !partialFailures.isEmpty }
+    private var hasPartials: Bool {
+        !partialFailures.isEmpty
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -509,33 +512,33 @@ internal struct SuccessToast: View {
 /// hand-tuned counterparts: surfaces invert (paper → near-black), cream
 /// hairlines step up to mid-greys, ink and warms invert, and the emerald
 /// accent shifts slightly brighter so it reads against a dark surface.
-internal enum Brand {
-    static let paper       = dynamic(light: 0xFFFFFF, dark: 0x1B1A18)
-    static let cream50     = dynamic(light: 0xF7F7F6, dark: 0x232220)
-    static let cream100    = dynamic(light: 0xEFEFEE, dark: 0x2D2B28)
-    static let cream200    = dynamic(light: 0xE3E3E1, dark: 0x3A3835)
-    static let cream300    = dynamic(light: 0xC7C7C5, dark: 0x4F4D49)
-    static let warm400     = dynamic(light: 0x98989A, dark: 0x7F7C76)
-    static let warm500     = dynamic(light: 0x757575, dark: 0xA6A39D)
-    static let warm600     = dynamic(light: 0x474747, dark: 0xD2D0CA)
-    static let warm700     = dynamic(light: 0x2D2D2D, dark: 0xE8E6E0)
-    static let ink         = dynamic(light: 0x0F0F0F, dark: 0xF7F6F1)
-    static let accent      = dynamic(light: 0x047857, dark: 0x34B58A)
-    static let accentSoft  = dynamic(light: 0x9FD4BE, dark: 0x1F5A48)
-    static let accentTint  = dynamic(light: 0xD5EBE0, dark: 0x142E26)
-    static let accentInk   = dynamic(light: 0x053D2C, dark: 0xA8E5CA)
-    static let dangerBg    = dynamic(light: 0xFBEAEE, dark: 0x3A1820)
+enum Brand {
+    static let paper = dynamic(light: 0xFFFFFF, dark: 0x1B1A18)
+    static let cream50 = dynamic(light: 0xF7F7F6, dark: 0x232220)
+    static let cream100 = dynamic(light: 0xEFEFEE, dark: 0x2D2B28)
+    static let cream200 = dynamic(light: 0xE3E3E1, dark: 0x3A3835)
+    static let cream300 = dynamic(light: 0xC7C7C5, dark: 0x4F4D49)
+    static let warm400 = dynamic(light: 0x98989A, dark: 0x7F7C76)
+    static let warm500 = dynamic(light: 0x757575, dark: 0xA6A39D)
+    static let warm600 = dynamic(light: 0x474747, dark: 0xD2D0CA)
+    static let warm700 = dynamic(light: 0x2D2D2D, dark: 0xE8E6E0)
+    static let ink = dynamic(light: 0x0F0F0F, dark: 0xF7F6F1)
+    static let accent = dynamic(light: 0x047857, dark: 0x34B58A)
+    static let accentSoft = dynamic(light: 0x9FD4BE, dark: 0x1F5A48)
+    static let accentTint = dynamic(light: 0xD5EBE0, dark: 0x142E26)
+    static let accentInk = dynamic(light: 0x053D2C, dark: 0xA8E5CA)
+    static let dangerBg = dynamic(light: 0xFBEAEE, dark: 0x3A1820)
     static let dangerBorder = dynamic(light: 0xF3C5CD, dark: 0x5C2333)
-    static let dangerText  = dynamic(light: 0x7A1D2E, dark: 0xF7B6C0)
-    static let sevLow      = accent
-    static let sevMed      = dynamic(light: 0xF0B96B, dark: 0xF0B96B)
-    static let sevHigh     = dynamic(light: 0x7A1D2E, dark: 0xF08599)
+    static let dangerText = dynamic(light: 0x7A1D2E, dark: 0xF7B6C0)
+    static let sevLow = accent
+    static let sevMed = dynamic(light: 0xF0B96B, dark: 0xF0B96B)
+    static let sevHigh = dynamic(light: 0x7A1D2E, dark: 0xF08599)
     /// Primary CTA — filled ink in light, filled emerald in dark.
-    static let primary     = dynamic(light: 0x0F0F0F, dark: 0x34B58A)
-    static let onPrimary   = dynamic(light: 0xFFFFFF, dark: 0x08110D)
+    static let primary = dynamic(light: 0x0F0F0F, dark: 0x34B58A)
+    static let onPrimary = dynamic(light: 0xFFFFFF, dark: 0x08110D)
     /// The system sheet draws its own scrim — this token is retained only for
     /// any future overlay use; UISheetPresentationController ignores it.
-    static let scrim       = Color.black.opacity(0.32)
+    static let scrim = Color.black.opacity(0.32)
 
     /// Builds a SwiftUI `Color` whose concrete value depends on the current
     /// `userInterfaceStyle`. Hex inputs are 0xRRGGBB.
@@ -561,7 +564,7 @@ private extension View {
     @ViewBuilder
     func scrollContentBackgroundCompat() -> some View {
         if #available(iOS 16.0, *) {
-            self.scrollContentBackground(.hidden)
+            scrollContentBackground(.hidden)
         } else {
             self
         }
@@ -570,7 +573,7 @@ private extension View {
     @ViewBuilder
     func scrollDismissesKeyboardCompat() -> some View {
         if #available(iOS 16.0, *) {
-            self.scrollDismissesKeyboard(.interactively)
+            scrollDismissesKeyboard(.interactively)
         } else {
             self
         }
@@ -583,7 +586,7 @@ private extension Text {
     @ViewBuilder
     func trackingCompat(_ value: CGFloat) -> some View {
         if #available(iOS 16.0, *) {
-            self.tracking(value)
+            tracking(value)
         } else {
             self
         }
@@ -609,7 +612,7 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
         return picker
     }
 
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+    func updateUIViewController(_: PHPickerViewController, context _: Context) {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -645,7 +648,7 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
             }
 
             group.notify(queue: .main) { [parent] in
-                let ordered = images.sorted { $0.0 < $1.0 }.map { $0.1 }
+                let ordered = images.sorted { $0.0 < $1.0 }.map(\.1)
                 parent.onPicked(ordered)
             }
         }

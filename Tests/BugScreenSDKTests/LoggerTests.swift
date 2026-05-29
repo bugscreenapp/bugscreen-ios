@@ -1,9 +1,8 @@
-import XCTest
 @testable import BugScreenSDK
+import XCTest
 
 /// Tests for Logger circular buffer functionality.
 final class LoggerTests: XCTestCase {
-
     var logger: Logger!
 
     override func setUp() {
@@ -50,7 +49,7 @@ final class LoggerTests: XCTestCase {
         // Assuming ~100 bytes per entry, we need ~11,000 entries
         let largeMessage = String(repeating: "X", count: 100)
 
-        for i in 0..<15000 {
+        for i in 0 ..< 15000 {
             logger.log("Message \(i): \(largeMessage)", level: .info)
         }
 
@@ -142,7 +141,7 @@ final class LoggerTests: XCTestCase {
                 // Verify timestamp format (YYYY-MM-DD HH:mm:ss.SSS)
                 let timestampPattern = "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}"
                 let regex = try NSRegularExpression(pattern: timestampPattern)
-                let range = NSRange(content.startIndex..<content.endIndex, in: content)
+                let range = NSRange(content.startIndex ..< content.endIndex, in: content)
                 let matches = regex.numberOfMatches(in: content, range: range)
 
                 XCTAssertGreaterThan(matches, 0, "Content should contain timestamp")
@@ -180,7 +179,7 @@ final class LoggerTests: XCTestCase {
     // MARK: - Thread Safety Tests
 
     func testConcurrentLogging() {
-        let expectation = self.expectation(description: "Concurrent logging")
+        let expectation = expectation(description: "Concurrent logging")
         expectation.expectedFulfillmentCount = 100
 
         DispatchQueue.concurrentPerform(iterations: 100) { index in
@@ -195,11 +194,11 @@ final class LoggerTests: XCTestCase {
 
     func testConcurrentExport() {
         // Add some logs
-        for i in 0..<10 {
+        for i in 0 ..< 10 {
             logger.log("Message \(i)", level: .info)
         }
 
-        let expectation = self.expectation(description: "Concurrent export")
+        let expectation = expectation(description: "Concurrent export")
         expectation.expectedFulfillmentCount = 5
 
         DispatchQueue.concurrentPerform(iterations: 5) { _ in
@@ -217,11 +216,11 @@ final class LoggerTests: XCTestCase {
 
     func testConcurrentClear() {
         // Add some logs
-        for i in 0..<100 {
+        for i in 0 ..< 100 {
             logger.log("Message \(i)", level: .info)
         }
 
-        let expectation = self.expectation(description: "Concurrent clear")
+        let expectation = expectation(description: "Concurrent clear")
         expectation.expectedFulfillmentCount = 10
 
         DispatchQueue.concurrentPerform(iterations: 10) { _ in
@@ -237,7 +236,7 @@ final class LoggerTests: XCTestCase {
     }
 
     func testMixedConcurrentOperations() {
-        let expectation = self.expectation(description: "Mixed concurrent operations")
+        let expectation = expectation(description: "Mixed concurrent operations")
         expectation.expectedFulfillmentCount = 30
 
         // Concurrent logging
@@ -270,54 +269,54 @@ final class LoggerTests: XCTestCase {
     // MARK: - Log Entry Format Tests
 
     #if DEBUG
-    func testLogEntryFormat() {
-        logger.log("Test message", level: .info)
+        func testLogEntryFormat() {
+            logger.log("Test message", level: .info)
 
-        let entries = logger.allEntries()
-        XCTAssertEqual(entries.count, 1)
+            let entries = logger.allEntries()
+            XCTAssertEqual(entries.count, 1)
 
-        let entry = entries[0]
-        let formatted = entry.formatted
+            let entry = entries[0]
+            let formatted = entry.formatted
 
-        // Should contain timestamp
-        XCTAssertTrue(formatted.contains("-"), "Should contain date separator")
-        XCTAssertTrue(formatted.contains(":"), "Should contain time separator")
+            // Should contain timestamp
+            XCTAssertTrue(formatted.contains("-"), "Should contain date separator")
+            XCTAssertTrue(formatted.contains(":"), "Should contain time separator")
 
-        // Should contain level
-        XCTAssertTrue(formatted.contains("[INFO]"), "Should contain log level")
+            // Should contain level
+            XCTAssertTrue(formatted.contains("[INFO]"), "Should contain log level")
 
-        // Should contain message
-        XCTAssertTrue(formatted.contains("Test message"), "Should contain message")
-    }
+            // Should contain message
+            XCTAssertTrue(formatted.contains("Test message"), "Should contain message")
+        }
 
-    func testLogEntryTimestamp() {
-        let before = Date()
-        logger.log("Test", level: .info)
-        let after = Date()
+        func testLogEntryTimestamp() {
+            let before = Date()
+            logger.log("Test", level: .info)
+            let after = Date()
 
-        let entries = logger.allEntries()
-        let entry = entries[0]
+            let entries = logger.allEntries()
+            let entry = entries[0]
 
-        XCTAssertGreaterThanOrEqual(entry.timestamp, before)
-        XCTAssertLessThanOrEqual(entry.timestamp, after)
-    }
+            XCTAssertGreaterThanOrEqual(entry.timestamp, before)
+            XCTAssertLessThanOrEqual(entry.timestamp, after)
+        }
 
-    // MARK: - Console Mirroring Gate
+        // MARK: - Console Mirroring Gate
 
-    func testConsoleLoggingDisabledByDefault() {
-        let defaultLogger = Logger()
-        XCTAssertFalse(
-            defaultLogger.consoleLoggingEnabled,
-            "Console mirroring should be off when the flag is not provided"
-        )
-    }
+        func testConsoleLoggingDisabledByDefault() {
+            let defaultLogger = Logger()
+            XCTAssertFalse(
+                defaultLogger.consoleLoggingEnabled,
+                "Console mirroring should be off when the flag is not provided"
+            )
+        }
 
-    func testConsoleLoggingEnabledFlagRoundTrips() {
-        let enabled = Logger(enableConsoleLogging: true)
-        let disabled = Logger(enableConsoleLogging: false)
+        func testConsoleLoggingEnabledFlagRoundTrips() {
+            let enabled = Logger(enableConsoleLogging: true)
+            let disabled = Logger(enableConsoleLogging: false)
 
-        XCTAssertTrue(enabled.consoleLoggingEnabled)
-        XCTAssertFalse(disabled.consoleLoggingEnabled)
-    }
+            XCTAssertTrue(enabled.consoleLoggingEnabled)
+            XCTAssertFalse(disabled.consoleLoggingEnabled)
+        }
     #endif
 }

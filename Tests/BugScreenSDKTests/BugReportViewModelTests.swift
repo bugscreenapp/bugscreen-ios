@@ -1,10 +1,9 @@
-import XCTest
-import UIKit
 @testable import BugScreenSDK
+import UIKit
+import XCTest
 
 @MainActor
 final class BugReportViewModelTests: XCTestCase {
-
     // MARK: - Auto-attach
 
     func testAutoAttachWhenAuthorizedAppendsScreenshot() async {
@@ -147,22 +146,22 @@ final class BugReportViewModelTests: XCTestCase {
 
     // MARK: - Attachments
 
-    func testAddScreenshotsCapsAtMax() async {
+    func testAddScreenshotsCapsAtMax() {
         let viewModel = makeViewModel()
-        let images = (0..<6).map { _ in TestHelpers.solidImage() }
+        let images = (0 ..< 6).map { _ in TestHelpers.solidImage() }
         viewModel.addScreenshots(images)
         XCTAssertEqual(viewModel.screenshots.count, BugReportViewModel.maxScreenshots)
         XCTAssertFalse(viewModel.canAddMoreScreenshots)
     }
 
-    func testAddScreenshotsRespectsRemainingSlots() async {
+    func testAddScreenshotsRespectsRemainingSlots() {
         let viewModel = makeViewModel()
         viewModel.addScreenshots([TestHelpers.solidImage(), TestHelpers.solidImage()])
         viewModel.addScreenshots([TestHelpers.solidImage(), TestHelpers.solidImage(), TestHelpers.solidImage()])
         XCTAssertEqual(viewModel.screenshots.count, BugReportViewModel.maxScreenshots)
     }
 
-    func testRemoveScreenshotByIndex() async {
+    func testRemoveScreenshotByIndex() {
         let viewModel = makeViewModel()
         viewModel.addScreenshots([TestHelpers.solidImage(), TestHelpers.solidImage()])
         viewModel.removeScreenshot(at: 0)
@@ -382,11 +381,10 @@ final class BugReportViewModelTests: XCTestCase {
     }
 
     private func flushMainTasks(times: Int = 8) async {
-        for _ in 0..<times {
+        for _ in 0 ..< times {
             await Task.yield()
         }
     }
-
 }
 
 // MARK: - Fakes
@@ -430,7 +428,7 @@ private final class FakePhotosPermission: PhotosPermissionRequesting {
 
     @MainActor
     func ensureAccess(
-        presenter: UIViewController,
+        presenter _: UIViewController,
         completion: @escaping (PhotosPermissionCoordinator.Outcome) -> Void
     ) {
         invocationCount += 1
@@ -447,7 +445,7 @@ private final class FakeScreenshotLocator: ScreenshotLocating {
     }
 
     func findLatestScreenshot(
-        since: Date,
+        since _: Date,
         completion: @escaping (UIImage?) -> Void
     ) {
         invocationCount += 1

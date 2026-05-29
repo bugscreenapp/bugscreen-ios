@@ -5,8 +5,8 @@
 //  Created by BugScreen on 2025-01-15.
 //
 
-import UIKit
 import OSLog
+import UIKit
 
 /// Observes screenshot events and automatically presents the bug report UI.
 ///
@@ -22,8 +22,7 @@ import OSLog
 ///
 /// ## Thread Safety:
 /// All UI operations are dispatched to the main thread.
-internal final class ScreenshotObserver {
-
+final class ScreenshotObserver {
     // MARK: - Properties
 
     /// Shared singleton instance.
@@ -83,7 +82,7 @@ internal final class ScreenshotObserver {
     // MARK: - Private Methods
 
     /// Handles the screenshot notification.
-    @objc private func handleScreenshotNotification(_ notification: Notification) {
+    @objc private func handleScreenshotNotification(_: Notification) {
         SDKLog.internalLog("Screenshot detected", log: logger, type: .debug)
 
         // Ensure we're on the main thread for UI checks
@@ -103,7 +102,8 @@ internal final class ScreenshotObserver {
 
         // 2. Check if screenshot detection is enabled
         guard let config = BugScreenSDK.configuration,
-              config.enableScreenshotDetection else {
+              config.enableScreenshotDetection
+        else {
             SDKLog.internalLog("Screenshot detection disabled, skipping", log: logger, type: .debug)
             return
         }
@@ -167,7 +167,8 @@ internal final class ScreenshotObserver {
     @MainActor
     private func getKeyWindow() -> UIWindow? {
         guard let scene = UIApplication.shared.connectedScenes
-            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else {
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene
+        else {
             return nil
         }
         return scene.windows.first(where: { $0.isKeyWindow })
