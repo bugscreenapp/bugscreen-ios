@@ -102,7 +102,8 @@ enum BugScreenSDKError: LocalizedError {
     private static func userMessage(forStatus status: Int, code: String?) -> String {
         switch code {
         case "auth.missing", "auth.invalid_key",
-             "config.no_integrations", "integrations.all_failed":
+             "config.no_integrations", "integrations.all_failed",
+             "plan_limit.reports":
             return SDKStrings.errorConfig
         case "validation.description":
             return SDKStrings.validationDescriptionRequired

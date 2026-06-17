@@ -13,6 +13,7 @@ struct BugReportView: View {
     @ObservedObject private var viewModel: BugReportViewModel
 
     @State private var showPhotoPicker = false
+    @State private var previewIndex: Int?
     @FocusState private var descriptionFocused: Bool
 
     init(viewModel: BugReportViewModel) {
@@ -23,6 +24,15 @@ struct BugReportView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if BugScreenSDK.showBranding {
+                        Image("BugScreenWordmark", bundle: BugScreenResources.bundle)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 26)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .accessibilityLabel("Reported with BugScreen")
+                    }
+
                     Text("Report an issue")
                         .font(.system(size: 22, weight: .semibold))
                         .trackingCompat(-0.4)
@@ -54,12 +64,12 @@ struct BugReportView: View {
                             canAddMore: viewModel.canAddMoreScreenshots,
                             enabled: viewModel.submissionState != .submitting,
                             onAdd: { showPhotoPicker = true },
-                            onRemove: { viewModel.removeScreenshot(at: $0) }
+                            onOpen: { previewIndex = $0 }
                         )
                     }
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 16)
+                .padding(.top, 28)
                 .padding(.bottom, 12)
             }
             .scrollDismissesKeyboardCompat()
@@ -76,6 +86,16 @@ struct BugReportView: View {
             PhotoPickerSheet(selectionLimit: max(1, viewModel.remainingScreenshotSlots)) { images in
                 viewModel.addScreenshots(images)
             }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { previewIndex != nil },
+            set: { if !$0 { previewIndex = nil } }
+        )) {
+            AttachmentPreview(
+                viewModel: viewModel,
+                startIndex: previewIndex ?? 0,
+                onClose: { previewIndex = nil }
+            )
         }
         .onAppear {
             viewModel.onAppear(presenter: Self.topPresentedViewController())
@@ -286,13 +306,13 @@ private struct AttachmentRow: View {
     let canAddMore: Bool
     let enabled: Bool
     let onAdd: () -> Void
-    let onRemove: (Int) -> Void
+    let onOpen: (Int) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(Array(screenshots.enumerated()), id: \.offset) { index, image in
                 AttachmentThumb(image: image, enabled: enabled) {
-                    onRemove(index)
+                    onOpen(index)
                 }
             }
             if canAddMore {
@@ -302,37 +322,189 @@ private struct AttachmentRow: View {
     }
 }
 
+/// Tapping a thumbnail opens the full-screen preview; removal moved into the
+/// preview's Delete button, so the thumbnail carries only an expand affordance.
 private struct AttachmentThumb: View {
     let image: UIImage
     let enabled: Bool
-    let onRemove: () -> Void
+    let onOpen: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 72, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Brand.cream100, lineWidth: 1)
-                )
+        Button(action: onOpen) {
+            ZStack(alignment: .bottomTrailing) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Brand.cream100, lineWidth: 1)
+                    )
 
-            Button(action: onRemove) {
-                Image(systemName: "xmark")
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 18, height: 18)
-                    .background(Color.black.opacity(0.7))
-                    .clipShape(Circle())
+                    .background(Color.black.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .padding(4)
             }
-            .buttonStyle(.plain)
-            .padding(4)
-            .disabled(!enabled)
-            .accessibilityLabel("Remove attachment")
+            .frame(width: 72, height: 72)
         }
-        .frame(width: 72, height: 72)
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(SDKStrings.previewOpen)
+    }
+}
+
+// MARK: - Full-screen attachment preview (CAP-014)
+
+/// Immersive lightbox over the reporter, opened by tapping a thumbnail. The
+/// `xmark` here closes the *preview*, not the reporter sheet — the sheet still
+/// has no close button (CAP-011). Delete lives here; the thumbnail no longer
+/// carries a remove badge.
+/// Index the preview should land on after the attachment at `deletedIndex` is
+/// removed from a list that now holds `newCount` items. `nil` means nothing is
+/// left, so the preview should close. Mirrors Android's
+/// `nextPreviewIndexAfterDelete` so both platforms clamp identically.
+func nextPreviewIndex(afterDeleting deletedIndex: Int, newCount: Int) -> Int? {
+    newCount <= 0 ? nil : min(deletedIndex, newCount - 1)
+}
+
+private struct AttachmentPreview: View {
+    @ObservedObject var viewModel: BugReportViewModel
+    @State private var index: Int
+    let onClose: () -> Void
+
+    init(viewModel: BugReportViewModel, startIndex: Int, onClose: @escaping () -> Void) {
+        self.viewModel = viewModel
+        _index = State(initialValue: startIndex)
+        self.onClose = onClose
+    }
+
+    private var count: Int {
+        viewModel.screenshots.count
+    }
+
+    private func deleteCurrent() {
+        let deleted = index
+        viewModel.removeScreenshot(at: deleted)
+        if let next = nextPreviewIndex(afterDeleting: deleted, newCount: viewModel.screenshots.count) {
+            index = next
+        } else {
+            onClose()
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            RadialGradient(
+                colors: [
+                    Color(red: 0.13, green: 0.118, blue: 0.094),
+                    Color(red: 0.055, green: 0.051, blue: 0.039),
+                ],
+                center: UnitPoint(x: 0.5, y: 0.18),
+                startRadius: 0,
+                endRadius: 900
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                topChrome
+                stage
+                if count > 1 {
+                    dots
+                }
+            }
+        }
+        .onChange(of: count) { newCount in
+            if let next = nextPreviewIndex(afterDeleting: index, newCount: newCount) {
+                index = next
+            } else {
+                onClose()
+            }
+        }
+    }
+
+    private var topChrome: some View {
+        HStack {
+            PreviewChip(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+            }
+            .accessibilityLabel(SDKStrings.previewClose)
+
+            Spacer()
+
+            VStack(spacing: 1) {
+                Text(SDKStrings.previewTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                Text(SDKStrings.previewCounter(index + 1, count))
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            Spacer()
+
+            PreviewChip(
+                action: deleteCurrent,
+                tint: Color(red: 0.94, green: 0.52, blue: 0.6),
+                background: Color(red: 0.94, green: 0.52, blue: 0.6).opacity(0.14)
+            ) {
+                Image(systemName: "trash")
+                    .font(.system(size: 16, weight: .medium))
+            }
+            .accessibilityLabel(SDKStrings.previewDelete)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+    }
+
+    private var stage: some View {
+        TabView(selection: $index) {
+            ForEach(Array(viewModel.screenshots.enumerated()), id: \.offset) { i, image in
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                    .tag(i)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
+    private var dots: some View {
+        HStack(spacing: 6) {
+            ForEach(0 ..< count, id: \.self) { i in
+                Capsule()
+                    .fill(i == index ? Color.white : Color.white.opacity(0.32))
+                    .frame(width: i == index ? 18 : 6, height: 6)
+            }
+        }
+        .padding(.bottom, 24)
+        .padding(.top, 8)
+    }
+}
+
+private struct PreviewChip<Content: View>: View {
+    let action: () -> Void
+    var tint: Color = .white
+    var background: Color = .white.opacity(0.12)
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        Button(action: action) {
+            content()
+                .foregroundColor(tint)
+                .frame(width: 38, height: 38)
+                .background(background)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

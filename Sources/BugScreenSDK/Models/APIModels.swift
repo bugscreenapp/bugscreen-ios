@@ -34,6 +34,17 @@ public struct BugReportPartialFailure: Codable, Sendable {
     public let message: String
 }
 
+// MARK: - SDK Config
+
+/// Runtime configuration returned by `GET /config`, resolved from the API key.
+///
+/// `showBranding` is `true` on Free plans and `false` when the org's effective
+/// plan removes branding.
+struct SdkConfig: Codable {
+    let appId: String
+    let showBranding: Bool
+}
+
 // MARK: - Error Response
 
 /// Error response from the bug reports API.

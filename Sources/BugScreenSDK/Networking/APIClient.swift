@@ -157,6 +157,32 @@ final class APIClient {
         )
     }
 
+    /// Fetches whether the reporter should show the BugScreen mark, derived from
+    /// the org's effective plan via `GET /config`.
+    ///
+    /// Fail-safe: returns `false` (hidden) on any error, so a paying customer
+    /// never sees the mark when config can't be reached. The mark is shown only
+    /// when the server explicitly reports a branded (Free) plan.
+    func fetchShowBranding() async -> Bool {
+        let url = baseURL.appendingPathComponent("config")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard
+                let httpResponse = response as? HTTPURLResponse,
+                httpResponse.statusCode == 200
+            else {
+                return false
+            }
+            return try JSONDecoder().decode(SdkConfig.self, from: data).showBranding
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Creates a multipart/form-data request body.

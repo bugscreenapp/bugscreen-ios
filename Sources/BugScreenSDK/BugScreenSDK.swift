@@ -23,7 +23,7 @@ import UIKit
 @MainActor
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process.
-    static let version: String = "1.1.1"
+    static let version: String = "1.2.0"
 
     // MARK: - Configuration
 
@@ -39,6 +39,15 @@ public enum BugScreenSDK {
     /// Custom key/value pairs attached to every subsequent bug report.
     /// Defaults to empty; mutated only via ``setCustomData(_:)`` / ``clearCustomData()``.
     private(set) static var customData: [String: String] = [:]
+
+    /// Whether the reporter should show the BugScreen mark. Fetched from
+    /// `GET /config` on ``configure(apiKey:enableScreenshotDetection:debug:)``
+    /// and held for the process lifetime (re-fetched on each launch). Defaults
+    /// to `false` (hidden) until the fetch resolves and as a fail-safe if it
+    /// fails, so a paying customer never sees the mark when config can't be
+    /// reached. The mark appears only once `/config` confirms a branded (Free)
+    /// plan.
+    private(set) static var showBranding: Bool = false
 
     /// Returns whether the SDK has been configured.
     ///
@@ -93,6 +102,14 @@ public enum BugScreenSDK {
         logger = Logger(enableConsoleLogging: debug)
 
         apiClient = APIClient(apiKey: apiKey)
+
+        if let client = apiClient {
+            // configure() is already @MainActor, so this Task inherits it; the
+            // nonisolated fetch runs off-main and only the assignment is on-main.
+            Task {
+                showBranding = await client.fetchShowBranding()
+            }
+        }
 
         if enableScreenshotDetection {
             ScreenshotObserver.shared.startObserving()
@@ -265,6 +282,7 @@ public enum BugScreenSDK {
         apiClient = nil
         configuration = nil
         customData = [:]
+        showBranding = false
     }
 
     #if DEBUG

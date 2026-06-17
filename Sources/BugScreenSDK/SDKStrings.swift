@@ -100,23 +100,28 @@ enum SDKStrings {
         localized("photos.permission.not_now")
     }
 
-    private static func localized(_ key: String) -> String {
-        String(localized: String.LocalizationValue(key), bundle: resourceBundle)
+    static var previewTitle: String {
+        localized("preview.title")
     }
 
-    private static let resourceBundle: Bundle = {
-        #if SWIFT_PACKAGE
-            return Bundle.module
-        #else
-            let containerBundle = Bundle(for: BundleToken.self)
-            if let url = containerBundle.url(forResource: "BugScreenSDK", withExtension: "bundle"),
-               let bundle = Bundle(url: url)
-            {
-                return bundle
-            }
-            return containerBundle
-        #endif
-    }()
-}
+    static var previewClose: String {
+        localized("preview.close")
+    }
 
-private final class BundleToken {}
+    static var previewDelete: String {
+        localized("preview.delete")
+    }
+
+    static var previewOpen: String {
+        localized("preview.open")
+    }
+
+    /// "N of M" attachment counter shown in the preview's top chrome.
+    static func previewCounter(_ current: Int, _ total: Int) -> String {
+        String(format: localized("preview.counter"), current, total)
+    }
+
+    private static func localized(_ key: String) -> String {
+        String(localized: String.LocalizationValue(key), bundle: BugScreenResources.bundle)
+    }
+}

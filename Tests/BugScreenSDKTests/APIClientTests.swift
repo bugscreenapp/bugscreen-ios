@@ -325,6 +325,25 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func test402PlanLimitReportsThrowsHTTPErrorWithConfigMessage() async {
+        let body = """
+        {"error":"Payment Required","message":"over cap","statusCode":402,"code":"plan_limit.reports"}
+        """.data(using: .utf8)!
+        stubStatus(402, body: body)
+        await XCTAssertThrowsErrorAsync(
+            try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
+        ) { error in
+            guard let sdkError = error as? BugScreenSDKError,
+                  case let .httpError(status, code, _) = sdkError
+            else {
+                return XCTFail("Expected .httpError, got \(error)")
+            }
+            XCTAssertEqual(status, 402)
+            XCTAssertEqual(code, "plan_limit.reports")
+            XCTAssertEqual(sdkError.userMessage, SDKStrings.errorConfig)
+        }
+    }
+
     func test500ResponseThrowsHTTPErrorWithMessage() async {
         stubStatus(500, body: errorResponseJSON(
             error: "Internal Server Error",
@@ -407,6 +426,44 @@ final class APIClientTests: XCTestCase {
             }
             XCTAssertEqual((underlying as? URLError)?.code, .badServerResponse)
         }
+    }
+
+    // MARK: - Config Fetch (showBranding)
+
+    func testFetchShowBrandingSendsGetToConfigWithBearerAuth() async {
+        stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":true}"#.utf8))
+
+        let showBranding = await makeClient().fetchShowBranding()
+
+        XCTAssertTrue(showBranding)
+        let request = StubURLProtocol.recordedRequests.first
+        XCTAssertEqual(request?.httpMethod, "GET")
+        XCTAssertEqual(request?.url?.path, "/config")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
+    }
+
+    func testFetchShowBrandingReturnsFalseWhenServerSaysSo() async {
+        stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false}"#.utf8))
+
+        let showBranding = await makeClient().fetchShowBranding()
+
+        XCTAssertFalse(showBranding)
+    }
+
+    func testFetchShowBrandingFailsSafeToFalseOnHTTPError() async {
+        stubStatus(401, body: Data())
+
+        let showBranding = await makeClient().fetchShowBranding()
+
+        XCTAssertFalse(showBranding)
+    }
+
+    func testFetchShowBrandingFailsSafeToFalseOnUndecodableBody() async {
+        stubStatus(200, body: Data(#"<html>not json</html>"#.utf8))
+
+        let showBranding = await makeClient().fetchShowBranding()
+
+        XCTAssertFalse(showBranding)
     }
 
     // MARK: - Helpers
