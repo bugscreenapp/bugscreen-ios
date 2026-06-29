@@ -466,6 +466,44 @@ final class APIClientTests: XCTestCase {
         XCTAssertFalse(showBranding)
     }
 
+    // MARK: - SDK Version Headers (OPS-011)
+
+    func testSubmitSendsSdkVersionTransportHeader() async throws {
+        stubSuccess()
+        _ = try await makeClient().submitBugReport(description: "valid", metadata: sampleMetadata())
+
+        let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-BugScreen-SDK"), "ios/\(BugScreenSDK.version)")
+        // No wrapper configured → header absent for a direct native integration.
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-BugScreen-SDK-Wrapper"))
+    }
+
+    func testFetchConfigSendsSdkVersionTransportHeader() async {
+        stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false}"#.utf8))
+        _ = await makeClient().fetchShowBranding()
+
+        let request = StubURLProtocol.recordedRequests.first
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "X-BugScreen-SDK"), "ios/\(BugScreenSDK.version)")
+        XCTAssertNil(request?.value(forHTTPHeaderField: "X-BugScreen-SDK-Wrapper"))
+    }
+
+    func testSubmitSendsWrapperHeaderWhenConfigured() async throws {
+        stubSuccess()
+        let client = APIClient(
+            apiKey: apiKey,
+            wrapperSdk: "rn/0.5.0",
+            baseURL: stubBaseURL,
+            session: StubURLProtocol.makeSession()
+        )
+        _ = try await client.submitBugReport(description: "valid", metadata: sampleMetadata())
+
+        let request = try XCTUnwrap(StubURLProtocol.recordedRequests.first)
+        // The native transport header (gating-relevant) is still the iOS SDK version...
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-BugScreen-SDK"), "ios/\(BugScreenSDK.version)")
+        // ...and the wrapper tag rides the informational header verbatim.
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-BugScreen-SDK-Wrapper"), "rn/0.5.0")
+    }
+
     // MARK: - Helpers
 
     private func errorResponseJSON(error: String, message: String, statusCode: Int) -> Data {
@@ -538,6 +576,30 @@ final class APIModelsTests: XCTestCase {
 
         XCTAssertTrue(response.success)
         XCTAssertEqual(response.issueURLs.count, 2)
+    }
+
+    func testBugReportResponseDecodesPartialFailureTypeAsOpenString() throws {
+        // bugscreen-c7e / INT-007 / CAP-009: partialFailures[].type is the live
+        // IntegrationType, carried as an open string. A type beyond the core three
+        // (here "slack", a future provider) must decode verbatim — never throw and never
+        // drop the entry — so this SDK build keeps working when a new provider ships.
+        let json = """
+        {
+            "success": true,
+            "message": "Bug report submitted successfully",
+            "issueUrls": ["https://github.com/example/repo/issues/123"],
+            "partialFailures": [
+                { "type": "slack", "message": "channel archived" }
+            ]
+        }
+        """
+
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(BugReportResponse.self, from: data)
+
+        XCTAssertEqual(response.partialFailures?.count, 1)
+        XCTAssertEqual(response.partialFailures?.first?.type, "slack")
+        XCTAssertEqual(response.partialFailures?.first?.message, "channel archived")
     }
 
     func testErrorResponseDecoding() throws {

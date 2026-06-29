@@ -202,6 +202,30 @@ final class BugReportViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.lastError)
     }
 
+    func testSubmitSurfacesPartialFailureWithOpenStringType() async {
+        // bugscreen-c7e / CAP-009: a partialFailures[].type beyond the core three
+        // (here "slack", a future provider) surfaces verbatim through the view model —
+        // the SDK presents it rather than crashing or dropping it when a provider ships.
+        let response = BugReportResponse(
+            success: true,
+            message: "ok",
+            issueURLs: ["https://github.com/example/repo/issues/1"],
+            partialFailures: [
+                BugReportPartialFailure(type: "slack", message: "channel archived"),
+            ]
+        )
+        let submitter = FakeBugReportSubmitter(result: .success(response))
+        let viewModel = makeViewModel(submitter: submitter)
+        viewModel.description = "Login button is unresponsive"
+
+        await viewModel.submit()
+
+        XCTAssertEqual(viewModel.submissionState, .success)
+        XCTAssertEqual(viewModel.partialFailures.count, 1)
+        XCTAssertEqual(viewModel.partialFailures.first?.type, "slack")
+        XCTAssertEqual(viewModel.partialFailures.first?.message, "channel archived")
+    }
+
     func testSubmitDefaultsTypeBugSeverityMedium() async {
         let submitter = FakeBugReportSubmitter()
         let viewModel = makeViewModel(submitter: submitter)

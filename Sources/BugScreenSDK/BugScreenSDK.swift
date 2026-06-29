@@ -22,8 +22,9 @@ import UIKit
 /// ```
 @MainActor
 public enum BugScreenSDK {
-    /// The version of the BugScreen SDK. Updated by the release process.
-    static let version: String = "1.2.0"
+    /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
+    /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
+    nonisolated static let version: String = "1.3.0"
 
     // MARK: - Configuration
 
@@ -84,6 +85,26 @@ public enum BugScreenSDK {
         enableScreenshotDetection: Bool = true,
         debug: Bool = false
     ) {
+        configure(
+            apiKey: apiKey,
+            enableScreenshotDetection: enableScreenshotDetection,
+            debug: debug,
+            wrapperSdk: nil
+        )
+    }
+
+    /// SPI entry point for BugScreen's own cross-platform wrappers (React Native). `wrapperSdk` is a
+    /// `<wrapper>/<semver>` tag (e.g. `rn/0.5.0`) emitted on the informational
+    /// `X-BugScreen-SDK-Wrapper` request header (OPS-011). Not part of the public API — app
+    /// developers integrating the native iOS SDK directly use the overload above; version-gating
+    /// keys off the native `X-BugScreen-SDK` transport header, not this value.
+    @_spi(Wrapper)
+    public static func configure(
+        apiKey: String,
+        enableScreenshotDetection: Bool = true,
+        debug: Bool = false,
+        wrapperSdk: String?
+    ) {
         if configuration != nil {
             SDKLog.internalLog("♻️ BugScreenSDK: Reconfiguring (previous configuration torn down)", type: .info)
             tearDown()
@@ -101,7 +122,7 @@ public enum BugScreenSDK {
 
         logger = Logger(enableConsoleLogging: debug)
 
-        apiClient = APIClient(apiKey: apiKey)
+        apiClient = APIClient(apiKey: apiKey, wrapperSdk: wrapperSdk)
 
         if let client = apiClient {
             // configure() is already @MainActor, so this Task inherits it; the

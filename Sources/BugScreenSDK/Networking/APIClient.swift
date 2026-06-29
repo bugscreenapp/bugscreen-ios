@@ -11,6 +11,11 @@ final class APIClient {
     /// API key for authentication (sent as Bearer token)
     private let apiKey: String
 
+    /// Optional `<wrapper>/<semver>` tag (e.g. `rn/0.5.0`) when a cross-platform wrapper drove
+    /// init, emitted on the informational `X-BugScreen-SDK-Wrapper` header (OPS-011). `nil` for a
+    /// direct native integration.
+    private let wrapperSdk: String?
+
     /// Base URL for the API
     private let baseURL: URL
 
@@ -23,17 +28,32 @@ final class APIClient {
     ///
     /// - Parameters:
     ///   - apiKey: The API key from BugScreen console (with "fb_" prefix)
+    ///   - wrapperSdk: Cross-platform wrapper tag for the `X-BugScreen-SDK-Wrapper` header (default: none)
     ///   - baseURL: The base URL for the API (default: production API)
     ///   - session: URLSession to use for requests. Defaults to a session
     ///     configured with the SDK's standard request/upload timeouts.
     init(
         apiKey: String,
+        wrapperSdk: String? = nil,
         baseURL: URL = URL(string: "https://qlqobn1oq5.execute-api.eu-west-2.amazonaws.com/prod/")!,
         session: URLSession? = nil
     ) {
         self.apiKey = apiKey
+        self.wrapperSdk = wrapperSdk
         self.baseURL = baseURL
         self.session = session ?? APIClient.makeDefaultSession()
+    }
+
+    /// Applies the headers every SDK→API request carries: Bearer auth and the OPS-011 SDK version
+    /// header(s). `X-BugScreen-SDK` is the transport header the server parses to gate
+    /// non-backwards-compatible response features; `X-BugScreen-SDK-Wrapper` is sent only when a
+    /// cross-platform wrapper drove init and is informational (never gates).
+    private func applyDefaultHeaders(to request: inout URLRequest) {
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("ios/\(BugScreenSDK.version)", forHTTPHeaderField: "X-BugScreen-SDK")
+        if let wrapperSdk {
+            request.setValue(wrapperSdk, forHTTPHeaderField: "X-BugScreen-SDK-Wrapper")
+        }
     }
 
     private static func makeDefaultSession() -> URLSession {
@@ -86,8 +106,8 @@ final class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
 
-        // Add authorization header with Bearer token
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        // Bearer auth + OPS-011 SDK version header(s)
+        applyDefaultHeaders(to: &request)
 
         // Create multipart boundary
         let boundary = "Boundary-\(UUID().uuidString)"
@@ -167,7 +187,7 @@ final class APIClient {
         let url = baseURL.appendingPathComponent("config")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        applyDefaultHeaders(to: &request)
 
         do {
             let (data, response) = try await session.data(for: request)
