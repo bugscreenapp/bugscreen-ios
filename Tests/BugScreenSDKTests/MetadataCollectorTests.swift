@@ -145,8 +145,27 @@ final class MetadataCollectorTests: XCTestCase {
             MetadataKeys.screenWidthPixels, MetadataKeys.screenHeightPixels,
             MetadataKeys.screenScale,
             MetadataKeys.totalMemory, MetadataKeys.availableMemory, MetadataKeys.locale,
+            MetadataKeys.appearance,
         ]
         XCTAssertTrue(expected.isSubset(of: Set(metadata.keys)))
+    }
+
+    // MARK: - Appearance Tests
+
+    func testAppearanceIsOneOfKnownValues() {
+        let metadata = MetadataCollector.collect()
+
+        let appearance = metadata[MetadataKeys.appearance] as? String
+        XCTAssertNotNil(appearance)
+        XCTAssertTrue(["Dark", "Light", "Unknown"].contains(appearance ?? ""))
+    }
+
+    func testAppearanceNameMapsEachStyle() {
+        // Direct mapping test — the only way to exercise the Unknown branch,
+        // which a simulator's resolved trait collection won't produce.
+        XCTAssertEqual(MetadataCollector.appearanceName(.dark), "Dark")
+        XCTAssertEqual(MetadataCollector.appearanceName(.light), "Light")
+        XCTAssertEqual(MetadataCollector.appearanceName(.unspecified), "Unknown")
     }
 
     func testBugscreenVersionNotOnTheWire() {

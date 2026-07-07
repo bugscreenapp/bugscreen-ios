@@ -102,7 +102,7 @@ final class BugReportViewModel: ObservableObject {
         autoAttachSince = Date()
         self.onDismiss = onDismiss
         self.onSuccess = onSuccess
-        let customData = BugScreenSDK.customData
+        let customData = BugScreenSDK.resolveReportCustomData()
         metadata = MetadataCollector.collect(customData: customData.isEmpty ? nil : customData)
         self.submitter = submitter
         self.photosPermission = photosPermission

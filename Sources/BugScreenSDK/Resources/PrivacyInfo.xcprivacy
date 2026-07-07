@@ -52,7 +52,7 @@
 			</array>
 		</dict>
 
-		<!-- OS version, app version, memory, locale, SDK version, in-memory log buffer -->
+		<!-- OS version, app version, memory, locale, appearance, SDK version, in-memory log buffer -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>

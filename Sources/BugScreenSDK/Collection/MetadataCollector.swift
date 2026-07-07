@@ -25,6 +25,7 @@ enum MetadataKeys {
     static let totalMemory = "Total Memory"
     static let availableMemory = "Available Memory"
     static let locale = "Locale"
+    static let appearance = "Appearance"
 }
 
 enum MetadataCollector {
@@ -48,6 +49,7 @@ enum MetadataCollector {
             MetadataKeys.totalMemory: formatBytes(ProcessInfo.processInfo.physicalMemory),
             MetadataKeys.availableMemory: formatBytes(availableMemory()),
             MetadataKeys.locale: Locale.current.identifier,
+            MetadataKeys.appearance: appearanceName(effectiveUserInterfaceStyle()),
         ]
         if let customData {
             for (key, value) in customData {
@@ -55,6 +57,31 @@ enum MetadataCollector {
             }
         }
         return metadata
+    }
+
+    // MARK: - Appearance
+
+    static func appearanceName(_ style: UIUserInterfaceStyle) -> String {
+        switch style {
+        case .dark: "Dark"
+        case .light: "Light"
+        default: "Unknown" // .unspecified + any future case
+        }
+    }
+
+    /// The interface style the app is actually rendering. Reads the key window's
+    /// trait collection so it honours an app-level `overrideUserInterfaceStyle`
+    /// and matches what the End User saw in the screenshot — rather than the raw
+    /// system setting from `UIScreen.main`, which an override app can differ from.
+    /// This mirrors Android, which reads the (overridable) Activity configuration.
+    /// Falls back to the screen's system style when no key window is available.
+    private static func effectiveUserInterfaceStyle() -> UIUserInterfaceStyle {
+        let keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }
+        return keyWindow?.traitCollection.userInterfaceStyle
+            ?? UIScreen.main.traitCollection.userInterfaceStyle
     }
 
     // MARK: - Device Information

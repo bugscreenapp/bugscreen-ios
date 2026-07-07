@@ -151,7 +151,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allow photo library access so BugScreen can attach the exact screenshot you just took — including the status bar and other system chrome. Without access, only the app’s content is captured. On the next screen, please tap “Allow Access to All Photos”."
+            "value": "Allow photo access to attach the exact screenshot you just took."
           }
         }
       }

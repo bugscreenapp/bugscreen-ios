@@ -49,7 +49,7 @@ struct DefaultBugReportSubmitter: BugReportSubmitting {
             throw BugScreenSDKError.notConfigured
         }
 
-        let customData = BugScreenSDK.customData
+        let customData = BugScreenSDK.resolveReportCustomData()
         let metadata = MetadataCollector.collect(
             customData: customData.isEmpty ? nil : customData
         )

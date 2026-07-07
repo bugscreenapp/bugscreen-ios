@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
     /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
-    nonisolated static let version: String = "1.3.0"
+    nonisolated static let version: String = "1.4.0"
 
     // MARK: - Configuration
 
@@ -40,6 +40,13 @@ public enum BugScreenSDK {
     /// Custom key/value pairs attached to every subsequent bug report.
     /// Defaults to empty; mutated only via ``setCustomData(_:)`` / ``clearCustomData()``.
     private(set) static var customData: [String: String] = [:]
+
+    /// The report account. A capture-time provider (evaluated when the report
+    /// screen opens) takes precedence over an eagerly-set static user, so a tester
+    /// switching logins never attaches a stale account. Kept separate from
+    /// `customData` so `clearCustomData()` doesn't wipe the user and vice versa.
+    private(set) static var user: BugScreenUser?
+    private(set) static var userProvider: (() -> BugScreenUser?)?
 
     /// Whether the reporter should show the BugScreen mark. Fetched from
     /// `GET /config` on ``configure(apiKey:enableScreenshotDetection:debug:)``
@@ -233,6 +240,72 @@ public enum BugScreenSDK {
         customData = [:]
     }
 
+    /// Identifies the account the report is filed under. The reporter's login is
+    /// the first thing a triager needs to reproduce a bug, so the backend renders
+    /// it as a dedicated Account section at the top of the created issue and
+    /// promotes `role` to a filterable label.
+    ///
+    /// This sets a static value. If the current account can change during a session
+    /// (e.g. QA switching logins), prefer ``setUserProvider(_:)`` so it is read
+    /// fresh at capture time. Setting a user here clears any provider previously
+    /// registered.
+    ///
+    /// Privacy: pass `email` only when your team wants a contactable address in the
+    /// tracker — it is off by default. Nothing is auto-collected.
+    ///
+    /// Must be called from the main actor.
+    ///
+    /// Example:
+    /// ```swift
+    /// BugScreenSDK.setUser(id: "pro-user-8823", role: "admin")
+    /// ```
+    public static func setUser(id: String, role: String? = nil, email: String? = nil) {
+        user = BugScreenUser(id: id, role: role, email: email)
+        userProvider = nil
+    }
+
+    /// Supplies the account lazily. The `provider` is invoked at capture time (when
+    /// the report screen opens), not when you register it — so the attached account
+    /// always reflects the current session and never a stale value from a previous
+    /// login. This is the primitive ``setUser(id:role:email:)`` is sugar over;
+    /// registering a provider clears any static user previously set.
+    ///
+    /// Keep `provider` fast and non-blocking — it runs on the main actor as the
+    /// report screen opens. Return already-known values; do not perform I/O. Return
+    /// `nil` to attach no account for this report.
+    ///
+    /// Must be called from the main actor.
+    ///
+    /// Example:
+    /// ```swift
+    /// BugScreenSDK.setUserProvider {
+    ///     session.currentUser.map { BugScreenUser(id: $0.id, role: $0.role) }
+    /// }
+    /// ```
+    public static func setUserProvider(_ provider: (() -> BugScreenUser?)?) {
+        userProvider = provider
+        user = nil
+    }
+
+    /// Clears any account set via ``setUser(id:role:email:)`` or
+    /// ``setUserProvider(_:)``. Subsequent reports carry no account until one is
+    /// set again.
+    public static func clearUser() {
+        user = nil
+        userProvider = nil
+    }
+
+    /// Merges the static `customData` with the resolved account (provider first,
+    /// else the static user) as reserved keys. Called once per report when the
+    /// report screen opens.
+    static func resolveReportCustomData() -> [String: String] {
+        let resolved = userProvider?() ?? user
+        guard let accountKeys = resolved?.toReservedKeys(), !accountKeys.isEmpty else {
+            return customData
+        }
+        return customData.merging(accountKeys) { _, new in new }
+    }
+
     /// Presents the bug report UI.
     ///
     /// Shows a modal screen where users can describe the bug, attach a screenshot,
@@ -303,6 +376,8 @@ public enum BugScreenSDK {
         apiClient = nil
         configuration = nil
         customData = [:]
+        user = nil
+        userProvider = nil
         showBranding = false
     }
 
