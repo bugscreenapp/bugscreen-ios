@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
     /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
-    nonisolated static let version: String = "1.4.0"
+    nonisolated static let version: String = "1.5.0"
 
     // MARK: - Configuration
 

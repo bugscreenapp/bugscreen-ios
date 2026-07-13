@@ -14,6 +14,14 @@ let package = Package(
             name: "BugScreenSDK",
             targets: ["BugScreenSDK"]
         ),
+        // No-op stub with an identical public API but empty bodies. Consumers
+        // pair it with BugScreenSDK per build configuration (CocoaPods
+        // `:configurations`) to keep BugScreen out of production builds. See
+        // docs/product/.../DX-009. Parity is enforced by check-noop-parity.sh.
+        .library(
+            name: "BugScreenSDKNoOp",
+            targets: ["BugScreenSDKNoOp"]
+        ),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -26,10 +34,23 @@ let package = Package(
                 .process("Resources")
             ]
         ),
+        .target(
+            name: "BugScreenSDKNoOp",
+            dependencies: [],
+            path: "Sources/BugScreenSDKNoOp"
+        ),
         .testTarget(
             name: "BugScreenSDKTests",
             dependencies: ["BugScreenSDK"],
             path: "Tests/BugScreenSDKTests"
+        ),
+        .testTarget(
+            name: "BugScreenSDKNoOpTests",
+            // Depends on both modules so NoOpValueParityTests can assert the
+            // stub's value-type *bodies* (displayName, CodingKeys) still match
+            // the real SDK — the symbol-graph parity check locks only signatures.
+            dependencies: ["BugScreenSDKNoOp", "BugScreenSDK"],
+            path: "Tests/BugScreenSDKNoOpTests"
         ),
     ]
 )
