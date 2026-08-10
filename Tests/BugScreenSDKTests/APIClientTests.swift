@@ -94,17 +94,29 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(decoded?["appVersion"] as? String, "1.2.3")
     }
 
+    /// A screenshot as the reporter now hands it over: already downscaled and re-encoded.
+    /// Encoding itself is asserted in BugScreenSDKReporterTests/ScreenshotPreparationTests
+    /// — what matters here is that the transport packs whatever it is given faithfully.
+    private func prepared(
+        _ image: UIImage = TestHelpers.solidImage(),
+        contentType: String = "image/jpeg",
+        fileExtension: String = "jpg"
+    ) -> PreparedScreenshot {
+        let data = image.jpegData(compressionQuality: 0.85) ?? Data([0xFF, 0xD8])
+        return PreparedScreenshot(data: data, contentType: contentType, fileExtension: fileExtension)
+    }
+
     func testMultipartBodyContainsScreenshot() async throws {
         stubSuccess()
         _ = try await makeClient().submitBugReport(
             description: "shot",
             metadata: sampleMetadata(),
-            screenshots: [TestHelpers.solidImage()]
+            screenshots: [prepared()]
         )
 
-        // Screenshots are always JPEG-encoded on the wire — the client
-        // downscales + re-encodes at q=0.85 so a 4-shot report fits the API
-        // Gateway 10 MB cap. Search raw Data (JPEG bytes aren't UTF-8).
+        // The transport writes whatever content type and extension it is handed. The
+        // downscale + re-encode that makes them JPEG happens in the reporter now
+        // (RFC-003 §2.2). Search raw Data (JPEG bytes aren't UTF-8).
         let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
         XCTAssertTrue(body.contains(utf8Bytes: "name=\"screenshot\"; filename=\"screenshot-1.jpg\""))
         XCTAssertTrue(body.contains(utf8Bytes: "Content-Type: image/jpeg"))
@@ -113,9 +125,9 @@ final class APIClientTests: XCTestCase {
     func testMultipartBodyContainsAllScreenshotsInOrder() async throws {
         stubSuccess()
         let images = [
-            TestHelpers.solidImage(color: .red),
-            TestHelpers.solidImage(color: .green),
-            TestHelpers.solidImage(color: .blue),
+            prepared(TestHelpers.solidImage(color: .red)),
+            prepared(TestHelpers.solidImage(color: .green)),
+            prepared(TestHelpers.solidImage(color: .blue)),
         ]
         _ = try await makeClient().submitBugReport(
             description: "shots",
@@ -134,7 +146,7 @@ final class APIClientTests: XCTestCase {
 
     func testScreenshotsCapAtFourEvenIfMorePassed() async throws {
         stubSuccess()
-        let images = (1 ... 6).map { _ in TestHelpers.solidImage() }
+        let images = (1 ... 6).map { _ in prepared() }
         _ = try await makeClient().submitBugReport(
             description: "shots",
             metadata: sampleMetadata(),
@@ -146,48 +158,6 @@ final class APIClientTests: XCTestCase {
             XCTAssertTrue(body.contains(utf8Bytes: "filename=\"screenshot-\(index).jpg\""))
         }
         XCTAssertFalse(body.contains(utf8Bytes: "filename=\"screenshot-5"))
-    }
-
-    func testScreenshotsAreDownscaledToFitDimensionCap() async throws {
-        stubSuccess()
-        // A 6000×4000 raw image — way over the 2000 px long-edge cap.
-        let oversized = TestHelpers.solidImage(width: 6000, height: 4000, color: .blue)
-        _ = try await makeClient().submitBugReport(
-            description: "huge",
-            metadata: sampleMetadata(),
-            screenshots: [oversized]
-        )
-
-        let body = try XCTUnwrap(StubURLProtocol.recordedBodies.first)
-        let encoded = try XCTUnwrap(APIClient.encodeScreenshotForUpload(oversized))
-        // Sanity-check the encoder caps the long edge at ~2000 px and the
-        // result is small (single screenshot well under 1 MB).
-        let decoded = try XCTUnwrap(UIImage(data: encoded.data))
-        XCTAssertLessThanOrEqual(max(decoded.size.width, decoded.size.height), APIClient.maxScreenshotDimension)
-        XCTAssertLessThan(encoded.data.count, 1_000_000)
-        XCTAssertEqual(encoded.contentType, "image/jpeg")
-        // And the body must include the JPEG part for the downscaled shot.
-        XCTAssertTrue(body.contains(utf8Bytes: "Content-Type: image/jpeg"))
-    }
-
-    func testScreenshotsAreDownscaledByPixelSizeNotPointSize() throws {
-        // Retina screenshot shape: 1179×2556 px at scale 3 ⇒ point size 393×852.
-        // The point-based check would let this through untouched; the pixel
-        // check must catch it.
-        let image = TestHelpers.retinaImage(pixelWidth: 1179, pixelHeight: 2556, scale: 3)
-        XCTAssertLessThan(max(image.size.width, image.size.height), APIClient.maxScreenshotDimension)
-        XCTAssertGreaterThan(
-            max(image.size.width, image.size.height) * image.scale,
-            APIClient.maxScreenshotDimension
-        )
-
-        let encoded = try XCTUnwrap(APIClient.encodeScreenshotForUpload(image))
-        // `UIImage(data:)` loads JPEGs at scale 1, so `size` reflects pixels here.
-        let decoded = try XCTUnwrap(UIImage(data: encoded.data))
-        XCTAssertLessThanOrEqual(
-            max(decoded.size.width, decoded.size.height),
-            APIClient.maxScreenshotDimension
-        )
     }
 
     func testMultipartBodyOmitsTypeAndSeverityWhenNil() async throws {

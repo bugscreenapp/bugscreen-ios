@@ -71,7 +71,7 @@ enum MetadataCollector {
 
     /// The interface style the app is actually rendering. Reads the key window's
     /// trait collection so it honours an app-level `overrideUserInterfaceStyle`
-    /// and matches what the End User saw in the screenshot — rather than the raw
+    /// and matches what the tester saw in the screenshot — rather than the raw
     /// system setting from `UIScreen.main`, which an override app can differ from.
     /// This mirrors Android, which reads the (overridable) Activity configuration.
     /// Falls back to the screen's system style when no key window is available.

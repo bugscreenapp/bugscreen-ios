@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
     /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
-    nonisolated static let version: String = "1.5.0"
+    nonisolated static let version: String = "1.6.0"
 
     // MARK: - Configuration
 
@@ -348,8 +348,14 @@ public enum BugScreenSDK {
             return
         }
 
+        // Everything the reporter needs from the SDK, in one value. The companion app
+        // builds its own equivalent — same reporter, different host (RFC-003 §2).
         let hostingController = BugReportHostingController(
-            screenshot: screenshot,
+            host: ReporterHost(
+                submitter: DefaultBugReportSubmitter(),
+                showBranding: showBranding
+            ),
+            screenshots: screenshot.map { [$0] } ?? [],
             autoAttach: autoAttach
         )
         presenter.present(hostingController, animated: true)

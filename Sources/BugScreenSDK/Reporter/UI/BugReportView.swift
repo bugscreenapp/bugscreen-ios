@@ -12,11 +12,16 @@ import UIKit
 struct BugReportView: View {
     @ObservedObject private var viewModel: BugReportViewModel
 
+    /// Supplied by the host rather than read off a global: the companion app's branding
+    /// answer comes from its own config call, not the SDK's (CAP-010).
+    private let showBranding: Bool
+
     @State private var showPhotoPicker = false
     @State private var previewIndex: Int?
     @FocusState private var descriptionFocused: Bool
 
-    init(viewModel: BugReportViewModel) {
+    init(viewModel: BugReportViewModel, showBranding: Bool = false) {
+        self.showBranding = showBranding
         self.viewModel = viewModel
     }
 
@@ -24,7 +29,7 @@ struct BugReportView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if BugScreenSDK.showBranding {
+                    if showBranding {
                         Image("BugScreenWordmark", bundle: BugScreenResources.bundle)
                             .resizable()
                             .scaledToFit()
@@ -58,7 +63,9 @@ struct BugReportView: View {
                         SeverityRow(selection: $viewModel.severity)
                     }
 
-                    Section(label: "Attachments") {
+                    // The label carries the cap so the tester reads it before running into it,
+                    // rather than discovering it when the Add tile disappears (CAP-004).
+                    Section(label: "Attachments · \(viewModel.screenshots.count) of \(BugReportViewModel.maxScreenshots)") {
                         AttachmentRow(
                             screenshots: viewModel.screenshots,
                             canAddMore: viewModel.canAddMoreScreenshots,
@@ -375,6 +382,9 @@ func nextPreviewIndex(afterDeleting deletedIndex: Int, newCount: Int) -> Int? {
 private struct AttachmentPreview: View {
     @ObservedObject var viewModel: BugReportViewModel
     @State private var index: Int
+    /// When set, the editor is swapped in over the preview for that attachment
+    /// (a content swap inside this same presentation — no third stacked sheet).
+    @State private var markupIndex: Int?
     let onClose: () -> Void
 
     init(viewModel: BugReportViewModel, startIndex: Int, onClose: @escaping () -> Void) {
@@ -399,22 +409,34 @@ private struct AttachmentPreview: View {
 
     var body: some View {
         ZStack {
-            RadialGradient(
-                colors: [
-                    Color(red: 0.13, green: 0.118, blue: 0.094),
-                    Color(red: 0.055, green: 0.051, blue: 0.039),
-                ],
-                center: UnitPoint(x: 0.5, y: 0.18),
-                startRadius: 0,
-                endRadius: 900
-            )
-            .ignoresSafeArea()
+            if let markupIndex, viewModel.screenshots.indices.contains(markupIndex) {
+                MarkupEditorView(
+                    image: viewModel.screenshots[markupIndex],
+                    onCancel: { self.markupIndex = nil },
+                    onSave: { edited in
+                        viewModel.replaceScreenshot(at: markupIndex, with: edited)
+                        self.markupIndex = nil
+                    }
+                )
+            } else {
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.13, green: 0.118, blue: 0.094),
+                        Color(red: 0.055, green: 0.051, blue: 0.039),
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.18),
+                    startRadius: 0,
+                    endRadius: 900
+                )
+                .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                topChrome
-                stage
-                if count > 1 {
-                    dots
+                VStack(spacing: 0) {
+                    topChrome
+                    stage
+                    markupEntryButton
+                    if count > 1 {
+                        dots
+                    }
                 }
             }
         }
@@ -425,6 +447,29 @@ private struct AttachmentPreview: View {
                 onClose()
             }
         }
+    }
+
+    /// Accent-filled rather than the preview's usual translucent chip: markup is the
+    /// one action on this screen worth advertising, and a glass chip beside a glass
+    /// Close read as chrome rather than an invitation (CAP-016).
+    private var markupEntryButton: some View {
+        Button {
+            markupIndex = index
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "pencil.and.outline")
+                    .font(.system(size: 15, weight: .medium))
+                Text(SDKStrings.markupOpen)
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 11)
+            .background(Color(red: 0.204, green: 0.71, blue: 0.541))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
     }
 
     private var topChrome: some View {
@@ -607,10 +652,10 @@ private struct ErrorSnackbar: View {
 /// content during the success state and by `SuccessToastPresenter` for the
 /// transient post-dismiss window.
 struct SuccessToast: View {
-    let partialFailures: [BugReportPartialFailure]
+    let partialFailures: [ReportPartialFailure]
     @State private var detailsVisible = false
 
-    init(partialFailures: [BugReportPartialFailure] = []) {
+    init(partialFailures: [ReportPartialFailure] = []) {
         self.partialFailures = partialFailures
     }
 
@@ -767,6 +812,24 @@ private extension Text {
 
 // MARK: - PHPickerViewController wrapper
 
+/// How the reporter asks for images. Separated from the view because
+/// `PHPickerViewController` cannot be driven from a unit test, and two of its settings carry
+/// behaviour worth asserting rather than assuming.
+enum PhotoPickerConfiguration {
+    static func make(selectionLimit: Int) -> PHPickerConfiguration {
+        var config = PHPickerConfiguration(photoLibrary: .shared())
+        config.filter = .images
+        // The caller passes the *remaining* slots, so the picker stops the tester at the cap
+        // instead of accepting a selection the form would silently trim (CAP-004).
+        config.selectionLimit = selectionLimit
+        // `.ordered` returns results in the order the tester tapped them, and numbers the
+        // badges to say so. The default is library order, which silently reorders a set of
+        // screenshots taken in the sequence the bug unfolded.
+        config.selection = .ordered
+        return config
+    }
+}
+
 /// Multi-image picker that works on iOS 15+ via `PHPickerViewController`.
 /// SwiftUI's `PhotosPicker` would be simpler but is iOS 16+.
 private struct PhotoPickerSheet: UIViewControllerRepresentable {
@@ -776,10 +839,7 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
     @Environment(\.presentationMode) private var presentationMode
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
-        var config = PHPickerConfiguration(photoLibrary: .shared())
-        config.filter = .images
-        config.selectionLimit = selectionLimit
-        let picker = PHPickerViewController(configuration: config)
+        let picker = PHPickerViewController(configuration: PhotoPickerConfiguration.make(selectionLimit: selectionLimit))
         picker.delegate = context.coordinator
         return picker
     }
@@ -830,7 +890,22 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
 // MARK: - Preview
 
 struct BugReportView_Previews: PreviewProvider {
+    /// The preview needs a transport it will never call.
+    private struct PreviewSubmitter: BugReportSubmitting {
+        @MainActor
+        func submitBugReport(
+            description _: String,
+            screenshots _: [PreparedScreenshot],
+            type _: String?,
+            severity _: String?
+        ) async throws -> ReportReceipt {
+            ReportReceipt(partialFailures: [])
+        }
+    }
+
     static var previews: some View {
-        BugReportView(viewModel: BugReportViewModel(onDismiss: {}))
+        BugReportView(
+            viewModel: BugReportViewModel(onDismiss: {}, submitter: PreviewSubmitter())
+        )
     }
 }

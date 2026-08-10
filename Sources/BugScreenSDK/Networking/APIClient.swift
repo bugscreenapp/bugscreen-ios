@@ -74,7 +74,9 @@ final class APIClient {
     /// - Parameters:
     ///   - description: User's description of the bug (required, 1-10000 characters)
     ///   - metadata: Device/app metadata to include in the report
-    ///   - screenshots: Up to 4 screenshot images. Each is downscaled to a 2000 pt
+    ///   - screenshots: Up to 4 already-prepared screenshots. Downscaling and
+    ///     re-encoding happen in the reporter (RFC-003 §2.2) — the transport only packs
+    ///     what it is handed. Historically each was downscaled to a 2000 pt
     ///     long edge and re-encoded as JPEG q=0.85 before upload so a 4-shot report
     ///     comfortably fits API Gateway's 10 MB request cap. Extra screenshots beyond
     ///     the 4th are dropped silently.
@@ -89,7 +91,7 @@ final class APIClient {
     func submitBugReport(
         description: String,
         metadata: BugReportMetadata,
-        screenshots: [UIImage] = [],
+        screenshots: [PreparedScreenshot] = [],
         type: String? = nil,
         severity: String? = nil,
         logFile: URL? = nil
@@ -119,10 +121,10 @@ final class APIClient {
         // Cap at 4: backend's busboy config rejects >4 `screenshot` parts.
         let capped = Array(screenshots.prefix(APIClient.maxScreenshots))
 
-        // Downscale + JPEG encoding for 4 retina screenshots can spend 1+ s of
-        // CPU time. The caller is `@MainActor`, so building the body inline
-        // would jank the UI mid-submit. Hop to a background task and await
-        // the encoded bytes.
+        // Concatenating 4 already-encoded screenshots is several MB of `Data`
+        // appends. The caller is `@MainActor`, so build the body off it. The
+        // expensive part — downscale + JPEG encode — happens in the reporter
+        // before it ever reaches here (RFC-003 §2.2).
         let body = try await Task.detached(priority: .userInitiated) {
             try APIClient.createMultipartBody(
                 boundary: boundary,
@@ -214,7 +216,7 @@ final class APIClient {
         boundary: String,
         description: String,
         metadata: BugReportMetadata,
-        screenshots: [UIImage],
+        screenshots: [PreparedScreenshot],
         type: String?,
         severity: String?,
         logFile: URL?
@@ -267,12 +269,11 @@ final class APIClient {
         // uses the same `screenshot` field name — busboy iterates them on the
         // server.
         for (index, screenshot) in screenshots.enumerated() {
-            guard let encoded = APIClient.encodeScreenshotForUpload(screenshot) else { continue }
-            let filename = "screenshot-\(index + 1).\(encoded.fileExt)"
+            let filename = "screenshot-\(index + 1).\(screenshot.fileExtension)"
             body.append("--\(boundary)\r\n")
             body.append("Content-Disposition: form-data; name=\"screenshot\"; filename=\"\(filename)\"\r\n")
-            body.append("Content-Type: \(encoded.contentType)\r\n\r\n")
-            body.append(encoded.data)
+            body.append("Content-Type: \(screenshot.contentType)\r\n\r\n")
+            body.append(screenshot.data)
             body.append("\r\n")
         }
 
@@ -296,59 +297,4 @@ final class APIClient {
     /// Maximum number of screenshots accepted per report. Matches the backend's
     /// busboy file-count limit and the Android SDK's `MAX_SCREENSHOTS`.
     static let maxScreenshots = 4
-
-    /// Long-edge cap (in pixels) for uploaded screenshots. 2000 matches
-    /// Android's `MAX_SCREENSHOT_DIMENSION_PX` — small enough that four
-    /// JPEGs fit comfortably under the 10 MB API Gateway request cap, large
-    /// enough to read body text on a phone screen.
-    static let maxScreenshotDimension: CGFloat = 2000
-
-    /// JPEG quality used when re-encoding screenshots before upload.
-    static let screenshotJpegQuality: CGFloat = 0.85
-
-    /// Downscales `image` so its long edge fits within `maxScreenshotDimension`
-    /// and re-encodes as JPEG. Falls back to a raw PNG if JPEG encoding
-    /// genuinely fails — the server still enforces a per-screenshot size
-    /// guard, so this is just a last-ditch attempt to produce *something*.
-    static func encodeScreenshotForUpload(
-        _ image: UIImage
-    ) -> (data: Data, contentType: String, fileExt: String)? {
-        let downscaled = downscale(image, longEdge: maxScreenshotDimension)
-        if let jpeg = downscaled.jpegData(compressionQuality: screenshotJpegQuality) {
-            return (jpeg, "image/jpeg", "jpg")
-        }
-        if let png = downscaled.pngData() {
-            return (png, "image/png", "png")
-        }
-        return nil
-    }
-
-    /// Returns `image` unchanged if its pixel long edge is already within
-    /// `longEdge`; otherwise renders a smaller bitmap whose pixel long edge
-    /// equals `longEdge`. Compares pixel dimensions (`size × scale`), not
-    /// points — a retina screenshot at 1179×2556 px / scale 3 reports a
-    /// point size of 393×852 and would otherwise slip past the cap.
-    private static func downscale(_ image: UIImage, longEdge: CGFloat) -> UIImage {
-        let pointSize = image.size
-        let scale = image.scale
-        let pixelWidth = pointSize.width * scale
-        let pixelHeight = pointSize.height * scale
-        let maxPixelSide = max(pixelWidth, pixelHeight)
-        guard maxPixelSide > longEdge, maxPixelSide > 0 else { return image }
-        let ratio = longEdge / maxPixelSide
-        let target = CGSize(
-            width: floor(pixelWidth * ratio),
-            height: floor(pixelHeight * ratio)
-        )
-        // Render at 1× so the target size we computed in pixels lands 1:1 in
-        // the output bitmap — otherwise the renderer would multiply by the
-        // device scale and we'd overshoot the cap.
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        let renderer = UIGraphicsImageRenderer(size: target, format: format)
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: target))
-        }
-    }
 }

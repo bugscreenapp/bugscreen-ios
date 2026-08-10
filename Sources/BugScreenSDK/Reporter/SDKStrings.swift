@@ -121,6 +121,54 @@ enum SDKStrings {
         String(format: localized("preview.counter"), current, total)
     }
 
+    static var markupOpen: String {
+        localized("markup.open")
+    }
+
+    static var markupTitle: String {
+        localized("markup.title")
+    }
+
+    static var markupCancel: String {
+        localized("markup.cancel")
+    }
+
+    static var markupDone: String {
+        localized("markup.done")
+    }
+
+    static var markupUndo: String {
+        localized("markup.undo")
+    }
+
+    static var markupToolBox: String {
+        localized("markup.tool.box")
+    }
+
+    static var markupToolArrow: String {
+        localized("markup.tool.arrow")
+    }
+
+    static var markupToolPen: String {
+        localized("markup.tool.pen")
+    }
+
+    static var markupToolRedact: String {
+        localized("markup.tool.redact")
+    }
+
+    static var markupRedactBlur: String {
+        localized("markup.redact.blur")
+    }
+
+    static var markupRedactSolid: String {
+        localized("markup.redact.solid")
+    }
+
+    static var markupInk: String {
+        localized("markup.ink")
+    }
+
     private static func localized(_ key: String) -> String {
         String(localized: String.LocalizationValue(key), bundle: BugScreenResources.bundle)
     }

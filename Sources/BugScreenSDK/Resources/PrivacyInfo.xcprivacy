@@ -38,21 +38,16 @@
 	-->
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array>
-		<!-- Device model identifier (e.g. iPhone15,2) — from MetadataCollector -->
-		<dict>
-			<key>NSPrivacyCollectedDataType</key>
-			<string>NSPrivacyCollectedDataTypeDeviceID</string>
-			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<false/>
-			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<false/>
-			<key>NSPrivacyCollectedDataTypePurposes</key>
-			<array>
-				<string>NSPrivacyCollectionPurposeAppFunctionality</string>
-			</array>
-		</dict>
+		<!--
+		  No NSPrivacyCollectedDataTypeDeviceID entry, deliberately. The device model
+		  MetadataCollector reads from uname (e.g. iPhone15,2) names a hardware model shared by
+		  every unit of that model — it identifies no device and no person, so it is diagnostic
+		  data, not an identifier. Apple tolerates over-declaring, but this manifest is read
+		  alongside the privacy policy (MKT-007), where declaring a device ID would contradict the
+		  disclosure that the SDK collects nothing device-identifying. See CAP-005.
+		-->
 
-		<!-- OS version, app version, memory, locale, appearance, SDK version, in-memory log buffer -->
+		<!-- Device model, OS version, app version, memory, locale, appearance, SDK version, in-memory log buffer -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>

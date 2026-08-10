@@ -170,15 +170,60 @@ final class BugReportViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.screenshots.count, 1)
     }
 
+    func testReplaceScreenshotSwapsImageInPlace() {
+        let original = TestHelpers.solidImage(color: .red)
+        let edited = TestHelpers.solidImage(color: .blue)
+        let viewModel = makeViewModel()
+        viewModel.addScreenshots([original, TestHelpers.solidImage()])
+
+        viewModel.replaceScreenshot(at: 0, with: edited)
+
+        XCTAssertEqual(viewModel.screenshots.count, 2)
+        XCTAssertTrue(viewModel.screenshots[0] === edited)
+    }
+
+    func testReplaceScreenshotIgnoresOutOfBounds() {
+        let viewModel = makeViewModel()
+        viewModel.addScreenshots([TestHelpers.solidImage()])
+
+        viewModel.replaceScreenshot(at: 5, with: TestHelpers.solidImage(color: .blue))
+
+        XCTAssertEqual(viewModel.screenshots.count, 1)
+    }
+
+    func testReplacingPlaceholderSlotClearsPlaceholderAndMakesFormDirty() async {
+        // A markup edit on the SDK-supplied placeholder makes it user-owned:
+        // the form becomes dirty and a late auto-attach must append, not
+        // overwrite the edited shot.
+        let fallback = TestHelpers.solidImage(color: .red)
+        let edited = TestHelpers.solidImage(color: .green)
+        let osScreenshot = TestHelpers.solidImage(color: .blue)
+        let viewModel = makeViewModel(
+            screenshot: fallback,
+            autoAttach: true,
+            permission: FakePhotosPermission(outcome: .authorized),
+            locator: FakeScreenshotLocator(result: osScreenshot)
+        )
+        // The bare placeholder is not dirty.
+        XCTAssertFalse(viewModel.isDirty)
+
+        viewModel.replaceScreenshot(at: 0, with: edited)
+        XCTAssertTrue(viewModel.isDirty)
+
+        viewModel.onAppear(presenter: UIViewController())
+        await flushMainTasks()
+
+        // Placeholder was cleared, so the OS screenshot appends rather than
+        // overwriting the user's edit.
+        XCTAssertEqual(viewModel.screenshots.count, 2)
+        XCTAssertTrue(viewModel.screenshots[0] === edited)
+        XCTAssertTrue(viewModel.screenshots[1] === osScreenshot)
+    }
+
     // MARK: - Submission
 
     func testSubmitSuccessInvokesOnSuccessNotOnDismiss() async {
-        let response = BugReportResponse(
-            success: true,
-            message: "ok",
-            issueURLs: ["https://github.com/example/repo/issues/1"],
-            partialFailures: nil
-        )
+        let response = ReportReceipt(partialFailures: [])
         let submitter = FakeBugReportSubmitter(result: .success(response))
         var dismissCount = 0
         var successCount = 0
@@ -206,12 +251,9 @@ final class BugReportViewModelTests: XCTestCase {
         // bugscreen-c7e / CAP-009: a partialFailures[].type beyond the core three
         // (here "slack", a future provider) surfaces verbatim through the view model —
         // the SDK presents it rather than crashing or dropping it when a provider ships.
-        let response = BugReportResponse(
-            success: true,
-            message: "ok",
-            issueURLs: ["https://github.com/example/repo/issues/1"],
+        let response = ReportReceipt(
             partialFailures: [
-                BugReportPartialFailure(type: "slack", message: "channel archived"),
+                ReportPartialFailure(type: "slack", message: "channel archived"),
             ]
         )
         let submitter = FakeBugReportSubmitter(result: .success(response))
@@ -414,25 +456,25 @@ final class BugReportViewModelTests: XCTestCase {
 // MARK: - Fakes
 
 private final class FakeBugReportSubmitter: BugReportSubmitting {
-    var result: Result<BugReportResponse, Error>
+    var result: Result<ReportReceipt, Error>
     private(set) var invocationCount = 0
     private(set) var lastDescription: String?
-    private(set) var lastScreenshots: [UIImage] = []
+    private(set) var lastScreenshots: [PreparedScreenshot] = []
     private(set) var lastType: String?
     private(set) var lastSeverity: String?
 
-    init(result: Result<BugReportResponse, Error> = .success(
-        BugReportResponse(success: true, message: "ok", issueURLs: [], partialFailures: nil)
+    init(result: Result<ReportReceipt, Error> = .success(
+        ReportReceipt(partialFailures: [])
     )) {
         self.result = result
     }
 
     func submitBugReport(
         description: String,
-        screenshots: [UIImage],
+        screenshots: [PreparedScreenshot],
         type: String?,
         severity: String?
-    ) async throws -> BugReportResponse {
+    ) async throws -> ReportReceipt {
         invocationCount += 1
         lastDescription = description
         lastScreenshots = screenshots

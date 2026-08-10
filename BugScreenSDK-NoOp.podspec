@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'BugScreenSDK-NoOp'
-  s.version          = '1.5.0'
+  s.version          = '1.6.0'
   s.summary          = 'No-op stub of BugScreenSDK to keep BugScreen out of production builds.'
   s.description      = <<-DESC
     A drop-in replacement for BugScreenSDK with an identical public API but empty

@@ -21,9 +21,6 @@ final class BugReportViewModel: ObservableObject {
     /// Reporter-selected severity. Forwarded to GitHub/Jira as a label/priority.
     @Published var severity: Severity = .medium
 
-    /// Device metadata collected automatically
-    @Published var metadata: [String: Any]
-
     /// Current submission state
     @Published var submissionState: SubmissionState = .idle
 
@@ -37,7 +34,7 @@ final class BugReportViewModel: ObservableObject {
 
     /// Partial integration failures from a successful submit. When non-empty,
     /// the success toast switches to its "with issues" variant.
-    @Published var partialFailures: [BugReportPartialFailure] = []
+    @Published var partialFailures: [ReportPartialFailure] = []
 
     /// Callback to dismiss the bug report UI (cancel / close).
     private var onDismiss: () -> Void
@@ -46,7 +43,7 @@ final class BugReportViewModel: ObservableObject {
     /// dismisses the sheet and surfaces the success toast over the host app.
     /// Receives any partial integration failures so the toast can switch to
     /// its "with issues" variant.
-    private var onSuccess: ([BugReportPartialFailure]) -> Void
+    private var onSuccess: ([ReportPartialFailure]) -> Void
 
     /// When true, the view model will try to append the most recent OS screenshot
     /// from the Photos library on first appearance.
@@ -84,8 +81,8 @@ final class BugReportViewModel: ObservableObject {
         screenshot: UIImage? = nil,
         autoAttach: Bool = false,
         onDismiss: @escaping () -> Void,
-        onSuccess: @escaping ([BugReportPartialFailure]) -> Void = { _ in },
-        submitter: BugReportSubmitting = DefaultBugReportSubmitter(),
+        onSuccess: @escaping ([ReportPartialFailure]) -> Void = { _ in },
+        submitter: BugReportSubmitting,
         photosPermission: PhotosPermissionRequesting = DefaultPhotosPermissionRequester(),
         screenshotLocator: ScreenshotLocating = DefaultScreenshotLocator()
     ) {
@@ -102,8 +99,6 @@ final class BugReportViewModel: ObservableObject {
         autoAttachSince = Date()
         self.onDismiss = onDismiss
         self.onSuccess = onSuccess
-        let customData = BugScreenSDK.resolveReportCustomData()
-        metadata = MetadataCollector.collect(customData: customData.isEmpty ? nil : customData)
         self.submitter = submitter
         self.photosPermission = photosPermission
         self.screenshotLocator = screenshotLocator
@@ -143,6 +138,14 @@ final class BugReportViewModel: ObservableObject {
         return !screenshots.isEmpty
     }
 
+    /// Whether a swipe / scrim-tap dismiss should be honored without a discard
+    /// prompt. Blocks entirely mid-submit; otherwise allows dismiss only when the
+    /// form has no unsaved input.
+    var canDismissWithoutConfirmation: Bool {
+        if submissionState == .submitting { return false }
+        return !isDirty
+    }
+
     // MARK: - Attachment Mutation
 
     /// Appends up to ``remainingScreenshotSlots`` images. Extras are dropped.
@@ -166,6 +169,18 @@ final class BugReportViewModel: ObservableObject {
             } else if index < placeholder {
                 placeholderIndex = placeholder - 1
             }
+        }
+    }
+
+    /// Replaces the attachment at `index` with an edited (marked-up) copy,
+    /// ignoring out-of-bounds indices. Clearing `placeholderIndex` when it
+    /// matches the edited slot stops a late auto-attach upgrade from
+    /// overwriting the user's markup; it also makes the form `isDirty`.
+    func replaceScreenshot(at index: Int, with image: UIImage) {
+        guard screenshots.indices.contains(index) else { return }
+        screenshots[index] = image
+        if placeholderIndex == index {
+            placeholderIndex = nil
         }
     }
 
@@ -211,14 +226,27 @@ final class BugReportViewModel: ObservableObject {
         partialFailures = []
 
         do {
+            // Downscale + re-encode before the transport sees them. Preparation is the
+            // reporter's job precisely because the transport is what a host replaces
+            // (RFC-003 §2.2), and on iOS it must also happen before a share extension's
+            // images cross the process boundary (COMP-004).
+            //
+            // Off the main actor: preparing 4 retina screenshots can spend 1+ s of CPU
+            // time, and this type is `@MainActor`, so doing it inline would freeze the
+            // sheet mid-submit.
+            let toPrepare = screenshots
+            let prepared = await Task.detached(priority: .userInitiated) {
+                toPrepare.compactMap(ScreenshotPreparation.prepare)
+            }.value
+
             let response = try await submitter.submitBugReport(
                 description: trimmed,
-                screenshots: screenshots,
+                screenshots: prepared,
                 type: bugType.apiValue,
                 severity: severity.apiValue
             )
 
-            partialFailures = response.partialFailures ?? []
+            partialFailures = response.partialFailures
             submissionState = .success
             onSuccess(partialFailures)
 
@@ -269,7 +297,7 @@ final class BugReportViewModel: ObservableObject {
     /// up callbacks that capture `self` once `super.init` has completed.
     func bind(
         onDismiss: @escaping () -> Void,
-        onSuccess: @escaping ([BugReportPartialFailure]) -> Void
+        onSuccess: @escaping ([ReportPartialFailure]) -> Void
     ) {
         self.onDismiss = onDismiss
         self.onSuccess = onSuccess

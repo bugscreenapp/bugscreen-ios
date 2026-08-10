@@ -23,6 +23,13 @@ let package = Package(
             targets: ["BugScreenSDKNoOp"]
         ),
     ],
+    dependencies: [
+        // Test-only. Inspects the SwiftUI view tree from XCTest so BugReportView
+        // gets view-layer coverage without XCUITest / on-device UI automation.
+        // Wired only into BugScreenSDKTests, so consumers of the library product
+        // never resolve it.
+        .package(url: "https://github.com/nalexn/ViewInspector", exact: "0.10.3"),
+    ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
@@ -31,7 +38,13 @@ let package = Package(
             dependencies: [],
             path: "Sources/BugScreenSDK",
             resources: [
-                .process("Resources")
+                // Two roots rather than one. Reporter/ is the directory the companion app
+                // compiles into its own target (RFC-003 §2.5), so its strings catalogue and
+                // asset catalogue have to travel with its code. PrivacyInfo.xcprivacy stays
+                // out of it deliberately: it declares the boot-time API *this* target makes,
+                // which is not the companion's to claim.
+                .process("Resources"),
+                .process("Reporter/Resources")
             ]
         ),
         .target(
@@ -41,8 +54,22 @@ let package = Package(
         ),
         .testTarget(
             name: "BugScreenSDKTests",
-            dependencies: ["BugScreenSDK"],
+            dependencies: [
+                "BugScreenSDK",
+                .product(name: "ViewInspector", package: "ViewInspector"),
+            ],
             path: "Tests/BugScreenSDKTests"
+        ),
+        // The reporter's own tests. A separate bundle from BugScreenSDKTests even though
+        // both now `@testable import BugScreenSDK`, because the reporter is a distinct
+        // area with its own fixtures — and because each bundle keeps its own TestHelpers.
+        .testTarget(
+            name: "BugScreenSDKReporterTests",
+            dependencies: [
+                "BugScreenSDK",
+                .product(name: "ViewInspector", package: "ViewInspector"),
+            ],
+            path: "Tests/BugScreenSDKReporterTests"
         ),
         .testTarget(
             name: "BugScreenSDKNoOpTests",

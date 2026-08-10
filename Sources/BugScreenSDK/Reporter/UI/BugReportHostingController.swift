@@ -5,39 +5,84 @@ import UIKit
 /// sheet via `UISheetPresentationController` — same role as Android's
 /// `ModalBottomSheet`. UIKit owns the scrim, slide animation, drag-to-dismiss,
 /// and grabber; the SwiftUI view renders only the form content.
-class BugReportHostingController: UIHostingController<BugReportView>,
+/// A plain `UIViewController` that *embeds* the SwiftUI form as a child rather than
+/// being a `UIHostingController<BugReportView>`.
+///
+/// The indirection is deliberate: it keeps `BugReportView` an implementation detail of
+/// this controller. Both hosts — the SDK and the companion app — present a view
+/// controller and hand it a `ReporterHost`; neither needs the SwiftUI type, and a
+/// `UIHostingController<BugReportView>` would put it in the signature they bind to.
+final class BugReportHostingController: UIViewController,
     UIAdaptivePresentationControllerDelegate
 {
-    private let viewModel: BugReportViewModel
+    /// Internal rather than private so a test can assert what the controller attached — the
+    /// `screenshots:` fan-out below is the companion app's whole share-sheet payload (COMP-004),
+    /// and silently dropping all but the first is exactly the regression worth pinning.
+    private(set) var viewModel: BugReportViewModel
 
+    /// Embedded in `viewDidLoad`, not `init`: adding it to `view` from the initialiser
+    /// would trigger `loadView` at construction and build the whole SwiftUI hierarchy
+    /// before anyone has decided to present it. `UIHostingController` did not do that.
+    private let content: UIHostingController<BugReportView>
+
+    /// Invoked exactly once when the reporter is finally dismissed — filed, discarded, or swiped
+    /// away. The SDK does not care about the outcome and passes `nil`; the companion app uses it to
+    /// decide whether a credential rejection seen at submit drops the device to unpaired (RFC-003
+    /// §2.5). It carries no result: whether a report was filed or the credential was rejected is the
+    /// host's own to track (the companion reads it off its submitter).
+    private let onFinished: (() -> Void)?
+    private var hasFinished = false
+
+    /// - Parameters:
+    ///   - host: what the reporter needs from whoever is presenting it — the transport, the
+    ///     permission and locator adapters, and whether to brand. The SDK passes one built from its
+    ///     API client; the companion app passes its own.
+    ///   - screenshots: images to attach up front, in order. The SDK passes at most one — its
+    ///     window-snapshot fallback, which auto-attach may later upgrade. The companion app passes
+    ///     everything the tester shared, so the array rather than a single image; anything beyond
+    ///     `BugReportViewModel.maxScreenshots` is dropped there.
+    ///   - onFinished: called once on final dismissal. `nil` for the SDK.
     init(
-        screenshot: UIImage? = nil,
-        autoAttach: Bool = false
+        host: ReporterHost,
+        screenshots: [UIImage] = [],
+        autoAttach: Bool = false,
+        onFinished: (() -> Void)? = nil
     ) {
+        self.onFinished = onFinished
         // Build the VM up front (without callbacks that capture `self`) so the
         // hosting controller owns it and can read `isDirty` from the UIKit
         // dismiss-delegate callbacks. Real callbacks are wired via `bind`
         // below, once `self` is available.
+        //
+        // The first image goes through `screenshot:` so the SDK's auto-attach placeholder
+        // semantics are unchanged; the rest are appended, which is also where the attachment
+        // ceiling is applied.
         let vm = BugReportViewModel(
-            screenshot: screenshot,
+            screenshot: screenshots.first,
             autoAttach: autoAttach,
             onDismiss: {},
-            onSuccess: { _ in }
+            onSuccess: { _ in },
+            submitter: host.submitter,
+            photosPermission: host.photosPermission,
+            screenshotLocator: host.screenshotLocator
         )
+        vm.addScreenshots(Array(screenshots.dropFirst()))
         viewModel = vm
-        super.init(rootView: BugReportView(viewModel: vm))
+        content = UIHostingController(rootView: BugReportView(viewModel: vm, showBranding: host.showBranding))
+        super.init(nibName: nil, bundle: nil)
 
         vm.bind(
             onDismiss: { [weak self] in
-                self?.dismiss(animated: true)
+                self?.dismiss(animated: true) { self?.finishOnce() }
             },
-            onSuccess: { [weak self] partials in
+            onSuccess: { [weak self] (partials: [ReportPartialFailure]) in
                 guard let self else { return }
                 let hostScene = view.window?.windowScene
                 dismiss(animated: true) {
                     if let scene = hostScene {
                         SuccessToastPresenter.show(on: scene, partialFailures: partials)
                     }
+                    self.finishOnce()
                 }
             }
         )
@@ -58,11 +103,42 @@ class BugReportHostingController: UIHostingController<BugReportView>,
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// The SwiftUI hierarchy is built here rather than in `init` — embedding from the
+    /// initialiser builds the whole view tree before the controller has a view to put it in.
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        addChild(content)
+        view.addSubview(content.view)
+        content.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.view.topAnchor.constraint(equalTo: view.topAnchor),
+            content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        content.didMove(toParent: self)
+    }
+
+    /// Fires the host's completion exactly once, whichever way the reporter was dismissed —
+    /// filed, cancelled, discarded, or swiped away.
+    private func finishOnce() {
+        guard !hasFinished else { return }
+        hasFinished = true
+        onFinished?()
+    }
+
     // MARK: - UIAdaptivePresentationControllerDelegate
 
     func presentationControllerShouldDismiss(_: UIPresentationController) -> Bool {
-        if viewModel.submissionState == .submitting { return false }
-        return !viewModel.isDirty
+        viewModel.canDismissWithoutConfirmation
+    }
+
+    /// The interactive swipe-to-dismiss path (only reachable when the form is clean, per
+    /// `presentationControllerShouldDismiss`). The self-dismiss paths complete via their own
+    /// dismissal closures; this covers the one the system drives.
+    func presentationControllerDidDismiss(_: UIPresentationController) {
+        finishOnce()
     }
 
     func presentationControllerDidAttemptToDismiss(_: UIPresentationController) {
@@ -80,7 +156,7 @@ class BugReportHostingController: UIHostingController<BugReportView>,
             title: SDKStrings.discardDialogConfirm,
             style: .destructive,
             handler: { [weak self] _ in
-                self?.dismiss(animated: true)
+                self?.dismiss(animated: true) { self?.finishOnce() }
             }
         ))
         alert.addAction(UIAlertAction(
@@ -113,7 +189,7 @@ private enum SuccessToastPresenter {
 
     static func show(
         on scene: UIWindowScene,
-        partialFailures: [BugReportPartialFailure] = [],
+        partialFailures: [ReportPartialFailure] = [],
         duration: TimeInterval? = nil
     ) {
         // Partial failures need time to read and expand the disclosure;
@@ -183,7 +259,7 @@ private final class PassthroughContainerView: UIView {
 /// spring-in. Sized by the parent hosting controller's auto-layout
 /// constraints, so the UIView host follows the toast's content height.
 private struct SuccessToastOverlay: View {
-    let partialFailures: [BugReportPartialFailure]
+    let partialFailures: [ReportPartialFailure]
     @State private var visible = false
 
     var body: some View {
