@@ -43,6 +43,20 @@ public struct BugReportPartialFailure: Codable, Sendable {
 struct SdkConfig: Codable {
     let appId: String
     let showBranding: Bool
+    let reportTypes: [String]?
+    let severityEnabled: Bool?
+}
+
+struct ResolvedSdkConfig {
+    let showBranding: Bool
+    let reportTypes: [String]
+    let severityEnabled: Bool
+
+    init(showBranding: Bool, reportTypes: [String], severityEnabled: Bool = true) {
+        self.showBranding = showBranding
+        self.reportTypes = reportTypes
+        self.severityEnabled = severityEnabled
+    }
 }
 
 // MARK: - Error Response

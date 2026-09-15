@@ -15,8 +15,16 @@ final class BugReportViewModel: ObservableObject {
     /// Up to ``BugReportViewModel/maxScreenshots`` images to attach to the report.
     @Published private(set) var screenshots: [UIImage] = []
 
-    /// Reporter-selected bug type. Forwarded to GitHub/Jira as a label.
-    @Published var bugType: BugType = .bug
+    /// Reporter-selected type display label. Nil when the Type section is hidden.
+    @Published var bugType: String?
+
+    @Published private(set) var reportTypes: [String] = []
+
+    @Published private(set) var showBranding = false
+
+    @Published private(set) var severityEnabled = true
+
+    @Published private(set) var configurationState: ConfigurationState = .loading
 
     /// Reporter-selected severity. Forwarded to GitHub/Jira as a label/priority.
     @Published var severity: Severity = .medium
@@ -69,6 +77,8 @@ final class BugReportViewModel: ObservableObject {
     private let submitter: BugReportSubmitting
     private let photosPermission: PhotosPermissionRequesting
     private let screenshotLocator: ScreenshotLocating
+    private let configurationLoader: @MainActor (Bool) async -> ReporterConfigurationResult
+    private var configurationLoadStarted = false
 
     // MARK: - Constants
 
@@ -84,7 +94,10 @@ final class BugReportViewModel: ObservableObject {
         onSuccess: @escaping ([ReportPartialFailure]) -> Void = { _ in },
         submitter: BugReportSubmitting,
         photosPermission: PhotosPermissionRequesting = DefaultPhotosPermissionRequester(),
-        screenshotLocator: ScreenshotLocating = DefaultScreenshotLocator()
+        screenshotLocator: ScreenshotLocating = DefaultScreenshotLocator(),
+        reportTypes: [String] = defaultReportTypes,
+        severityEnabled: Bool = true,
+        configurationLoader: (@MainActor (Bool) async -> ReporterConfigurationResult)? = nil
     ) {
         if let screenshot {
             screenshots = [screenshot]
@@ -102,6 +115,23 @@ final class BugReportViewModel: ObservableObject {
         self.submitter = submitter
         self.photosPermission = photosPermission
         self.screenshotLocator = screenshotLocator
+        if let configurationLoader {
+            self.configurationLoader = configurationLoader
+            bugType = nil
+        } else {
+            self.configurationLoader = { _ in
+                .ready(ReporterConfiguration(
+                    showBranding: false,
+                    reportTypes: reportTypes,
+                    severityEnabled: severityEnabled
+                ))
+            }
+            self.reportTypes = reportTypes
+            bugType = reportTypes.first
+            self.severityEnabled = severityEnabled
+            configurationState = .ready
+            configurationLoadStarted = true
+        }
     }
 
     // MARK: - Computed Properties
@@ -143,6 +173,7 @@ final class BugReportViewModel: ObservableObject {
     /// form has no unsaved input.
     var canDismissWithoutConfirmation: Bool {
         if submissionState == .submitting { return false }
+        if configurationState != .ready { return true }
         return !isDirty
     }
 
@@ -207,6 +238,32 @@ final class BugReportViewModel: ObservableObject {
 
     // MARK: - Actions
 
+    func loadConfigurationIfNeeded() {
+        guard !configurationLoadStarted else { return }
+        configurationLoadStarted = true
+        Task { await loadConfiguration(forceRefresh: false) }
+    }
+
+    func retryConfiguration() {
+        Task { await loadConfiguration(forceRefresh: true) }
+    }
+
+    private func loadConfiguration(forceRefresh: Bool) async {
+        configurationState = .loading
+        switch await configurationLoader(forceRefresh) {
+        case let .ready(configuration):
+            showBranding = configuration.showBranding
+            reportTypes = configuration.reportTypes
+            bugType = configuration.reportTypes.first
+            severityEnabled = configuration.severityEnabled
+            configurationState = .ready
+        case .unavailable:
+            configurationState = .error
+        case .notReady, .credentialRejected:
+            onDismiss()
+        }
+    }
+
     /// Submits the bug report to the backend.
     func submit() async {
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -242,8 +299,8 @@ final class BugReportViewModel: ObservableObject {
             let response = try await submitter.submitBugReport(
                 description: trimmed,
                 screenshots: prepared,
-                type: bugType.apiValue,
-                severity: severity.apiValue
+                type: bugType,
+                severity: severityEnabled ? severity.apiValue : nil
             )
 
             partialFailures = response.partialFailures
@@ -307,7 +364,7 @@ final class BugReportViewModel: ObservableObject {
     func reset() {
         description = ""
         screenshots = []
-        bugType = .bug
+        bugType = reportTypes.first
         severity = .medium
         submissionState = .idle
         lastError = nil
@@ -325,29 +382,10 @@ final class BugReportViewModel: ObservableObject {
         case error
     }
 
-    // MARK: - Bug Type
-
-    /// Mirrors Android `BugType` and the values accepted by `POST /reports`.
-    enum BugType: String, CaseIterable, Identifiable {
-        case bug
-        case ui
-        case crash
-
-        var id: String {
-            rawValue
-        }
-
-        var apiValue: String {
-            rawValue
-        }
-
-        var displayName: String {
-            switch self {
-            case .bug: "Bug"
-            case .ui: "UI"
-            case .crash: "Crash"
-            }
-        }
+    enum ConfigurationState: Equatable {
+        case loading
+        case ready
+        case error
     }
 
     // MARK: - Severity

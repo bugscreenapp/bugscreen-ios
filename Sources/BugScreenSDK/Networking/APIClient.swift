@@ -80,8 +80,8 @@ final class APIClient {
     ///     long edge and re-encoded as JPEG q=0.85 before upload so a 4-shot report
     ///     comfortably fits API Gateway's 10 MB request cap. Extra screenshots beyond
     ///     the 4th are dropped silently.
-    ///   - type: Reporter-selected bug type ("bug" | "ui" | "crash"). Forwarded to
-    ///     GitHub/Jira as a label on the created issue.
+    ///   - type: Reporter-selected Type display label. Forwarded as human-readable
+    ///     classification and, where supported, a native label.
     ///   - severity: Reporter-selected severity ("low" | "medium" | "high"). Forwarded
     ///     to GitHub/Jira as a label / priority on the created issue.
     ///   - logFile: Optional log file URL (typically from Logger.exportToFile())
@@ -179,30 +179,26 @@ final class APIClient {
         )
     }
 
-    /// Fetches whether the reporter should show the BugScreen mark, derived from
-    /// the org's effective plan via `GET /config`.
-    ///
-    /// Fail-safe: returns `false` (hidden) on any error, so a paying customer
-    /// never sees the mark when config can't be reached. The mark is shown only
-    /// when the server explicitly reports a branded (Free) plan.
-    func fetchShowBranding() async -> Bool {
+    /// Fetches the authoritative reporter configuration from `GET /config`.
+    func fetchRuntimeConfig() async throws -> ResolvedSdkConfig {
         let url = baseURL.appendingPathComponent("config")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         applyDefaultHeaders(to: &request)
 
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard
-                let httpResponse = response as? HTTPURLResponse,
-                httpResponse.statusCode == 200
-            else {
-                return false
-            }
-            return try JSONDecoder().decode(SdkConfig.self, from: data).showBranding
-        } catch {
-            return false
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw BugScreenSDKError.invalidResponse
         }
+        guard httpResponse.statusCode == 200 else {
+            throw BugScreenSDKError.httpError(status: httpResponse.statusCode, code: nil, message: nil)
+        }
+        let config = try JSONDecoder().decode(SdkConfig.self, from: data)
+        return ResolvedSdkConfig(
+            showBranding: config.showBranding,
+            reportTypes: config.reportTypes ?? defaultReportTypes,
+            severityEnabled: config.severityEnabled ?? true
+        )
     }
 
     // MARK: - Private Helpers

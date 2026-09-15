@@ -64,11 +64,12 @@ final class BugReportHostingController: UIViewController,
             onSuccess: { _ in },
             submitter: host.submitter,
             photosPermission: host.photosPermission,
-            screenshotLocator: host.screenshotLocator
+            screenshotLocator: host.screenshotLocator,
+            configurationLoader: host.configurationLoader
         )
         vm.addScreenshots(Array(screenshots.dropFirst()))
         viewModel = vm
-        content = UIHostingController(rootView: BugReportView(viewModel: vm, showBranding: host.showBranding))
+        content = UIHostingController(rootView: BugReportView(viewModel: vm))
         super.init(nibName: nil, bundle: nil)
 
         vm.bind(
@@ -143,6 +144,7 @@ final class BugReportHostingController: UIViewController,
 
     func presentationControllerDidAttemptToDismiss(_: UIPresentationController) {
         guard viewModel.submissionState != .submitting else { return }
+        guard viewModel.configurationState == .ready else { return }
         presentDiscardConfirmation()
     }
 

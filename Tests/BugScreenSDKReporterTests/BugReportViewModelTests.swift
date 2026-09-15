@@ -275,7 +275,7 @@ final class BugReportViewModelTests: XCTestCase {
 
         await viewModel.submit()
 
-        XCTAssertEqual(submitter.lastType, "bug")
+        XCTAssertEqual(submitter.lastType, "Bug")
         XCTAssertEqual(submitter.lastSeverity, "medium")
     }
 
@@ -283,13 +283,46 @@ final class BugReportViewModelTests: XCTestCase {
         let submitter = FakeBugReportSubmitter()
         let viewModel = makeViewModel(submitter: submitter)
         viewModel.description = "selected fields"
-        viewModel.bugType = .crash
+        viewModel.bugType = "Crash"
         viewModel.severity = .high
 
         await viewModel.submit()
 
-        XCTAssertEqual(submitter.lastType, "crash")
+        XCTAssertEqual(submitter.lastType, "Crash")
         XCTAssertEqual(submitter.lastSeverity, "high")
+    }
+
+    func testSubmitOmitsSeverityWhenItIsDisabled() async {
+        let submitter = FakeBugReportSubmitter()
+        let viewModel = makeViewModel(submitter: submitter, severityEnabled: false)
+        viewModel.description = "severity is hidden"
+
+        await viewModel.submit()
+
+        XCTAssertNil(submitter.lastSeverity)
+    }
+
+    func testSubmitUsesFirstCustomType() async {
+        let submitter = FakeBugReportSubmitter()
+        let viewModel = makeViewModel(
+            submitter: submitter,
+            reportTypes: ["Question", "Suggestion"]
+        )
+        viewModel.description = "custom fields"
+
+        await viewModel.submit()
+
+        XCTAssertEqual(submitter.lastType, "Question")
+    }
+
+    func testSubmitOmitsTypeWhenThereAreNoOptions() async {
+        let submitter = FakeBugReportSubmitter()
+        let viewModel = makeViewModel(submitter: submitter, reportTypes: [])
+        viewModel.description = "no type field"
+
+        await viewModel.submit()
+
+        XCTAssertNil(submitter.lastType)
     }
 
     func testSubmitForwardsScreenshots() async {
@@ -427,6 +460,55 @@ final class BugReportViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isDirty)
     }
 
+    // MARK: - Runtime configuration readiness
+
+    func testConfigurationFailureThenRetryUsesFreshResult() async {
+        var forced: [Bool] = []
+        let viewModel = BugReportViewModel(
+            onDismiss: {},
+            submitter: FakeBugReportSubmitter(),
+            configurationLoader: { forceRefresh in
+                forced.append(forceRefresh)
+                if forceRefresh {
+                    return .ready(ReporterConfiguration(
+                        showBranding: true,
+                        reportTypes: ["Question"]
+                    ))
+                }
+                return .unavailable
+            }
+        )
+
+        viewModel.loadConfigurationIfNeeded()
+        await flushMainTasks()
+        XCTAssertEqual(viewModel.configurationState, .error)
+        XCTAssertTrue(viewModel.reportTypes.isEmpty)
+
+        viewModel.retryConfiguration()
+        await flushMainTasks()
+        XCTAssertEqual(forced, [false, true])
+        XCTAssertEqual(viewModel.configurationState, .ready)
+        XCTAssertEqual(viewModel.reportTypes, ["Question"])
+        XCTAssertEqual(viewModel.bugType, "Question")
+        XCTAssertTrue(viewModel.showBranding)
+    }
+
+    func testConfigurationLoadingAndErrorRemainDismissibleWithSuppliedCapture() async {
+        let viewModel = BugReportViewModel(
+            screenshot: TestHelpers.solidImage(),
+            onDismiss: {},
+            submitter: FakeBugReportSubmitter(),
+            configurationLoader: { _ in .unavailable }
+        )
+
+        XCTAssertEqual(viewModel.configurationState, .loading)
+        XCTAssertTrue(viewModel.canDismissWithoutConfirmation)
+        viewModel.loadConfigurationIfNeeded()
+        await flushMainTasks()
+        XCTAssertEqual(viewModel.configurationState, .error)
+        XCTAssertTrue(viewModel.canDismissWithoutConfirmation)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel(
@@ -434,7 +516,9 @@ final class BugReportViewModelTests: XCTestCase {
         autoAttach: Bool = false,
         submitter: BugReportSubmitting = FakeBugReportSubmitter(),
         permission: PhotosPermissionRequesting = FakePhotosPermission(outcome: .authorized),
-        locator: ScreenshotLocating = FakeScreenshotLocator(result: nil)
+        locator: ScreenshotLocating = FakeScreenshotLocator(result: nil),
+        reportTypes: [String] = defaultReportTypes,
+        severityEnabled: Bool = true
     ) -> BugReportViewModel {
         BugReportViewModel(
             screenshot: screenshot,
@@ -442,7 +526,9 @@ final class BugReportViewModelTests: XCTestCase {
             onDismiss: {},
             submitter: submitter,
             photosPermission: permission,
-            screenshotLocator: locator
+            screenshotLocator: locator,
+            reportTypes: reportTypes,
+            severityEnabled: severityEnabled
         )
     }
 

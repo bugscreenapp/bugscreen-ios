@@ -12,24 +12,37 @@ import UIKit
 struct BugReportView: View {
     @ObservedObject private var viewModel: BugReportViewModel
 
-    /// Supplied by the host rather than read off a global: the companion app's branding
-    /// answer comes from its own config call, not the SDK's (CAP-010).
-    private let showBranding: Bool
-
     @State private var showPhotoPicker = false
     @State private var previewIndex: Int?
     @FocusState private var descriptionFocused: Bool
 
-    init(viewModel: BugReportViewModel, showBranding: Bool = false) {
-        self.showBranding = showBranding
+    init(viewModel: BugReportViewModel) {
         self.viewModel = viewModel
     }
 
     var body: some View {
+        Group {
+            switch viewModel.configurationState {
+            case .loading:
+                configurationLoading
+            case .error:
+                configurationError
+            case .ready:
+                form
+            }
+        }
+        .background(Brand.paper.ignoresSafeArea())
+        .onAppear {
+            viewModel.loadConfigurationIfNeeded()
+            viewModel.onAppear(presenter: Self.topPresentedViewController())
+        }
+    }
+
+    private var form: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if showBranding {
+                    if viewModel.showBranding {
                         Image("BugScreenWordmark", bundle: BugScreenResources.bundle)
                             .resizable()
                             .scaledToFit()
@@ -55,12 +68,16 @@ struct BugReportView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Section(label: "Type") {
-                        TypeChipRow(selection: $viewModel.bugType)
+                    if !viewModel.reportTypes.isEmpty {
+                        Section(label: "Type") {
+                            TypeChipRow(options: viewModel.reportTypes, selection: $viewModel.bugType)
+                        }
                     }
 
-                    Section(label: "Severity") {
-                        SeverityRow(selection: $viewModel.severity)
+                    if viewModel.severityEnabled {
+                        Section(label: "Severity") {
+                            SeverityRow(selection: $viewModel.severity)
+                        }
                     }
 
                     // The label carries the cap so the tester reads it before running into it,
@@ -83,7 +100,6 @@ struct BugReportView: View {
 
             footer
         }
-        .background(Brand.paper.ignoresSafeArea())
         .onChange(of: viewModel.description) { _ in
             if viewModel.descriptionValidationMessage != nil {
                 viewModel.descriptionValidationMessage = nil
@@ -104,9 +120,38 @@ struct BugReportView: View {
                 onClose: { previewIndex = nil }
             )
         }
-        .onAppear {
-            viewModel.onAppear(presenter: Self.topPresentedViewController())
+    }
+
+    private var configurationLoading: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .tint(Brand.accent)
+                .accessibilityLabel("Loading report settings")
+            Text("Loading report settings")
+                .font(.system(size: 14))
+                .foregroundColor(Brand.warm600)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    private var configurationError: some View {
+        VStack(spacing: 12) {
+            Text("Couldn't load report settings")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(Brand.ink)
+                .multilineTextAlignment(.center)
+            Text("Check your connection and try again.")
+                .font(.system(size: 14))
+                .foregroundColor(Brand.warm600)
+                .multilineTextAlignment(.center)
+            Button("Retry") { viewModel.retryConfiguration() }
+                .buttonStyle(.borderedProminent)
+                .tint(Brand.accent)
+                .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
     }
 
     private var footer: some View {
@@ -218,12 +263,13 @@ private struct DescriptionField: View {
 }
 
 private struct TypeChipRow: View {
-    @Binding var selection: BugReportViewModel.BugType
+    let options: [String]
+    @Binding var selection: String?
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(BugReportViewModel.BugType.allCases) { type in
-                TypeChip(type: type, active: selection == type) {
+            ForEach(options, id: \.self) { type in
+                TypeChip(label: type, active: selection == type) {
                     selection = type
                 }
                 .frame(maxWidth: .infinity)
@@ -233,15 +279,16 @@ private struct TypeChipRow: View {
 }
 
 private struct TypeChip: View {
-    let type: BugReportViewModel.BugType
+    let label: String
     let active: Bool
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            Text(type.displayName)
+            Text(label)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(active ? Brand.accentInk : Brand.warm600)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity)

@@ -1,6 +1,27 @@
 import Foundation
 import UIKit
 
+let defaultReportTypes = ["Bug", "UI", "Crash"]
+
+struct ReporterConfiguration {
+    let showBranding: Bool
+    let reportTypes: [String]
+    let severityEnabled: Bool
+
+    init(showBranding: Bool, reportTypes: [String], severityEnabled: Bool = true) {
+        self.showBranding = showBranding
+        self.reportTypes = reportTypes
+        self.severityEnabled = severityEnabled
+    }
+}
+
+enum ReporterConfigurationResult {
+    case ready(ReporterConfiguration)
+    case unavailable
+    case notReady
+    case credentialRejected
+}
+
 /// What the reporter needs from whoever is hosting it.
 ///
 /// `BugScreenSDK` supplies an implementation backed by the app API key and the SDK's own
@@ -65,19 +86,28 @@ struct ReporterHost {
     let photosPermission: PhotosPermissionRequesting
     let screenshotLocator: ScreenshotLocating
 
-    /// Whether to show the BugScreen wordmark. Fail-safe `false` when unknown (CAP-010).
-    let showBranding: Bool
+    /// Loads the authoritative configuration for this presentation. A forced load is Retry.
+    let configurationLoader: @MainActor (Bool) async -> ReporterConfigurationResult
 
     init(
         submitter: BugReportSubmitting,
         photosPermission: PhotosPermissionRequesting = DefaultPhotosPermissionRequester(),
         screenshotLocator: ScreenshotLocating = DefaultScreenshotLocator(),
-        showBranding: Bool
+        showBranding: Bool,
+        reportTypes: [String] = defaultReportTypes,
+        severityEnabled: Bool = true,
+        configurationLoader: (@MainActor (Bool) async -> ReporterConfigurationResult)? = nil
     ) {
         self.submitter = submitter
         self.photosPermission = photosPermission
         self.screenshotLocator = screenshotLocator
-        self.showBranding = showBranding
+        self.configurationLoader = configurationLoader ?? { _ in
+            .ready(ReporterConfiguration(
+                showBranding: showBranding,
+                reportTypes: reportTypes,
+                severityEnabled: severityEnabled
+            ))
+        }
     }
 }
 

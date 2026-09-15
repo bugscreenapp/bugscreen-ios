@@ -100,12 +100,38 @@ final class BugReportViewTests: XCTestCase {
 
     func testTappingTypeChipUpdatesBoundType() throws {
         let viewModel = makeViewModel()
-        XCTAssertEqual(viewModel.bugType, .bug)
+        XCTAssertEqual(viewModel.bugType, "Bug")
 
         let sut = BugReportView(viewModel: viewModel)
-        try sut.inspect().find(button: BugReportViewModel.BugType.ui.displayName).tap()
+        try sut.inspect().find(button: "UI").tap()
 
-        XCTAssertEqual(viewModel.bugType, .ui)
+        XCTAssertEqual(viewModel.bugType, "UI")
+    }
+
+    func testCustomTypeLabelsRenderVerbatimAndInOrder() throws {
+        let viewModel = makeViewModel(reportTypes: ["Bug", "Question", "Suggestion"])
+        let view = try BugReportView(viewModel: viewModel).inspect()
+
+        XCTAssertNoThrow(try view.find(button: "Bug"))
+        XCTAssertNoThrow(try view.find(button: "Question"))
+        XCTAssertNoThrow(try view.find(button: "Suggestion"))
+        XCTAssertEqual(viewModel.bugType, "Bug")
+    }
+
+    func testCustomTypeLabelsAreCenteredWhenTheyWrap() throws {
+        let label = "The labels are long lolo"
+        let viewModel = makeViewModel(reportTypes: [label, "Question", "Suggestion"])
+        let text = try BugReportView(viewModel: viewModel).inspect().find(text: label)
+
+        XCTAssertEqual(try text.multilineTextAlignment(), .center)
+    }
+
+    func testEmptyTypeListOmitsTheWholeSection() throws {
+        let viewModel = makeViewModel(reportTypes: [])
+        let view = try BugReportView(viewModel: viewModel).inspect()
+
+        XCTAssertThrowsError(try view.find(text: "TYPE"))
+        XCTAssertNil(viewModel.bugType)
     }
 
     func testTappingSeverityPillUpdatesBoundSeverity() throws {
@@ -116,6 +142,48 @@ final class BugReportViewTests: XCTestCase {
         try sut.inspect().find(button: BugReportViewModel.Severity.high.displayName).tap()
 
         XCTAssertEqual(viewModel.severity, .high)
+    }
+
+    func testDisabledSeverityOmitsTheWholeSection() throws {
+        let view = try BugReportView(viewModel: makeViewModel(severityEnabled: false)).inspect()
+
+        XCTAssertThrowsError(try view.find(text: "SEVERITY"))
+        XCTAssertThrowsError(try view.find(button: BugReportViewModel.Severity.medium.displayName))
+    }
+
+    // MARK: - Runtime configuration readiness
+
+    func testConfigurationLoadingHidesTheFormAndRetainsItsCapture() throws {
+        let viewModel = BugReportViewModel(
+            screenshot: UIImage(),
+            onDismiss: {},
+            submitter: FakeBugReportSubmitter(),
+            configurationLoader: { _ in .unavailable }
+        )
+        let view = try BugReportView(viewModel: viewModel).inspect()
+
+        XCTAssertNoThrow(try view.find(ViewType.ProgressView.self))
+        XCTAssertNoThrow(try view.find(text: "Loading report settings"))
+        XCTAssertThrowsError(try view.find(text: "Report an issue"))
+        XCTAssertEqual(viewModel.screenshots.count, 1)
+    }
+
+    func testConfigurationErrorShowsGuidanceAndRetry() async throws {
+        let viewModel = BugReportViewModel(
+            onDismiss: {},
+            submitter: FakeBugReportSubmitter(),
+            configurationLoader: { _ in .unavailable }
+        )
+        viewModel.loadConfigurationIfNeeded()
+        for _ in 0 ..< 8 {
+            await Task.yield()
+        }
+
+        let view = try BugReportView(viewModel: viewModel).inspect()
+        XCTAssertNoThrow(try view.find(text: "Couldn't load report settings"))
+        XCTAssertNoThrow(try view.find(text: "Check your connection and try again."))
+        XCTAssertNoThrow(try view.find(button: "Retry"))
+        XCTAssertThrowsError(try view.find(text: "Report an issue"))
     }
 
     // MARK: - Attachment cap
@@ -138,13 +206,19 @@ final class BugReportViewTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeViewModel(screenshot: UIImage? = nil) -> BugReportViewModel {
+    private func makeViewModel(
+        screenshot: UIImage? = nil,
+        reportTypes: [String] = defaultReportTypes,
+        severityEnabled: Bool = true
+    ) -> BugReportViewModel {
         BugReportViewModel(
             screenshot: screenshot,
             onDismiss: {},
             submitter: FakeBugReportSubmitter(),
             photosPermission: FakePhotosPermission(),
-            screenshotLocator: FakeScreenshotLocator()
+            screenshotLocator: FakeScreenshotLocator(),
+            reportTypes: reportTypes,
+            severityEnabled: severityEnabled
         )
     }
 }

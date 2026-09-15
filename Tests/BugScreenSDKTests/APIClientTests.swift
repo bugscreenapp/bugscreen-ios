@@ -398,42 +398,67 @@ final class APIClientTests: XCTestCase {
         }
     }
 
-    // MARK: - Config Fetch (showBranding)
+    // MARK: - Runtime Config Fetch
 
-    func testFetchShowBrandingSendsGetToConfigWithBearerAuth() async {
+    func testFetchRuntimeConfigSendsGetToConfigWithBearerAuth() async throws {
         stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":true}"#.utf8))
 
-        let showBranding = await makeClient().fetchShowBranding()
+        let runtimeConfig = try await makeClient().fetchRuntimeConfig()
 
-        XCTAssertTrue(showBranding)
+        XCTAssertTrue(runtimeConfig.showBranding)
+        XCTAssertTrue(runtimeConfig.severityEnabled)
         let request = StubURLProtocol.recordedRequests.first
         XCTAssertEqual(request?.httpMethod, "GET")
         XCTAssertEqual(request?.url?.path, "/config")
         XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
     }
 
-    func testFetchShowBrandingReturnsFalseWhenServerSaysSo() async {
-        stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false}"#.utf8))
+    func testFetchRuntimeConfigReturnsFalseWhenServerSaysSo() async throws {
+        stubStatus(
+            200,
+            body: Data(#"{"appId":"app-123","showBranding":false,"severityEnabled":false}"#.utf8)
+        )
 
-        let showBranding = await makeClient().fetchShowBranding()
+        let runtimeConfig = try await makeClient().fetchRuntimeConfig()
 
-        XCTAssertFalse(showBranding)
+        XCTAssertFalse(runtimeConfig.showBranding)
+        XCTAssertEqual(runtimeConfig.reportTypes, defaultReportTypes)
+        XCTAssertFalse(runtimeConfig.severityEnabled)
     }
 
-    func testFetchShowBrandingFailsSafeToFalseOnHTTPError() async {
+    func testFetchRuntimeConfigDistinguishesCustomEmptyAndMissingReportTypes() async throws {
+        stubStatus(
+            200,
+            body: Data(#"{"appId":"app-123","showBranding":false,"reportTypes":["Bug","Question"]}"#.utf8)
+        )
+        var config = try await makeClient().fetchRuntimeConfig()
+        XCTAssertEqual(config.reportTypes, ["Bug", "Question"])
+
+        stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false,"reportTypes":[]}"#.utf8))
+        config = try await makeClient().fetchRuntimeConfig()
+        XCTAssertEqual(config.reportTypes, [])
+
+        stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false}"#.utf8))
+        config = try await makeClient().fetchRuntimeConfig()
+        XCTAssertEqual(config.reportTypes, defaultReportTypes)
+    }
+
+    func testFetchRuntimeConfigThrowsOnHTTPError() async {
         stubStatus(401, body: Data())
 
-        let showBranding = await makeClient().fetchShowBranding()
-
-        XCTAssertFalse(showBranding)
+        await XCTAssertThrowsErrorAsync(try await makeClient().fetchRuntimeConfig()) { error in
+            guard case BugScreenSDKError.httpError = error else {
+                return XCTFail("Expected HTTP error, got \(error)")
+            }
+        }
     }
 
-    func testFetchShowBrandingFailsSafeToFalseOnUndecodableBody() async {
+    func testFetchRuntimeConfigThrowsOnUndecodableBody() async {
         stubStatus(200, body: Data(#"<html>not json</html>"#.utf8))
 
-        let showBranding = await makeClient().fetchShowBranding()
-
-        XCTAssertFalse(showBranding)
+        await XCTAssertThrowsErrorAsync(try await makeClient().fetchRuntimeConfig()) { error in
+            XCTAssertTrue(error is DecodingError)
+        }
     }
 
     // MARK: - SDK Version Headers (OPS-011)
@@ -450,7 +475,7 @@ final class APIClientTests: XCTestCase {
 
     func testFetchConfigSendsSdkVersionTransportHeader() async {
         stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false}"#.utf8))
-        _ = await makeClient().fetchShowBranding()
+        _ = try? await makeClient().fetchRuntimeConfig()
 
         let request = StubURLProtocol.recordedRequests.first
         XCTAssertEqual(request?.value(forHTTPHeaderField: "X-BugScreen-SDK"), "ios/\(BugScreenSDK.version)")
@@ -698,6 +723,60 @@ final class APIClientConfigurationTests: XCTestCase {
 
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
         XCTAssertEqual(StubURLProtocol.recordedRequests.first?.url?.host, "stub-b.bugscreen.test")
+    }
+
+    func testDelayedRuntimeConfigFromPreviousClientCannotOverwriteReconfiguration() async throws {
+        let firstConfig = RuntimeConfigLatch()
+        BugScreenSDK.configureForTesting(
+            apiKey: TestHelpers.validAPIKey,
+            baseURL: try XCTUnwrap(URL(string: "https://stub-a.bugscreen.test/")),
+            session: StubURLProtocol.makeSession(),
+            runtimeConfigLoader: { _ in await firstConfig.wait() }
+        )
+        await Task.yield()
+
+        BugScreenSDK.configureForTesting(
+            apiKey: TestHelpers.validAPIKey,
+            baseURL: try XCTUnwrap(URL(string: "https://stub-b.bugscreen.test/")),
+            session: StubURLProtocol.makeSession(),
+            runtimeConfigLoader: { _ in
+                ResolvedSdkConfig(
+                    showBranding: false,
+                    reportTypes: ["Question", "Suggestion"],
+                    severityEnabled: false
+                )
+            }
+        )
+        await Task.yield()
+        await firstConfig.release(
+            ResolvedSdkConfig(showBranding: true, reportTypes: ["Old"])
+        )
+        await Task.yield()
+
+        XCTAssertEqual(BugScreenSDK.reportTypes, ["Question", "Suggestion"])
+        XCTAssertFalse(BugScreenSDK.showBranding)
+        XCTAssertFalse(BugScreenSDK.severityEnabled)
+    }
+}
+
+private actor RuntimeConfigLatch {
+    private var continuation: CheckedContinuation<ResolvedSdkConfig, Never>?
+    private var bufferedValue: ResolvedSdkConfig?
+
+    func wait() async -> ResolvedSdkConfig {
+        if let bufferedValue {
+            return bufferedValue
+        }
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release(_ value: ResolvedSdkConfig) {
+        if let continuation {
+            self.continuation = nil
+            continuation.resume(returning: value)
+        } else {
+            bufferedValue = value
+        }
     }
 }
 

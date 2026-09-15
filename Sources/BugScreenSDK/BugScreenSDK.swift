@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
     /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
-    nonisolated static let version: String = "1.6.0"
+    nonisolated static let version: String = "1.7.0"
 
     // MARK: - Configuration
 
@@ -37,6 +37,11 @@ public enum BugScreenSDK {
     /// Returns the internal API client (used by the bug report UI submit adapter).
     private(set) static var apiClient: APIClient?
 
+    private static var runtimeConfigTask: Task<Result<ResolvedSdkConfig, Error>, Never>?
+    private static var runtimeConfigLoader: (APIClient) async throws -> ResolvedSdkConfig = {
+        try await $0.fetchRuntimeConfig()
+    }
+
     /// Custom key/value pairs attached to every subsequent bug report.
     /// Defaults to empty; mutated only via ``setCustomData(_:)`` / ``clearCustomData()``.
     private(set) static var customData: [String: String] = [:]
@@ -48,14 +53,17 @@ public enum BugScreenSDK {
     private(set) static var user: BugScreenUser?
     private(set) static var userProvider: (() -> BugScreenUser?)?
 
-    /// Whether the reporter should show the BugScreen mark. Fetched from
-    /// `GET /config` on ``configure(apiKey:enableScreenshotDetection:debug:)``
-    /// and held for the process lifetime (re-fetched on each launch). Defaults
-    /// to `false` (hidden) until the fetch resolves and as a fail-safe if it
-    /// fails, so a paying customer never sees the mark when config can't be
-    /// reached. The mark appears only once `/config` confirms a branded (Free)
-    /// plan.
+    /// The last successfully loaded branding value. A reporter presentation waits for its
+    /// authoritative config attempt and never uses this value as a request-failure fallback.
     private(set) static var showBranding: Bool = false
+
+    /// The last successfully loaded type choices. A successful legacy response that omits the
+    /// field preserves the defaults; a failed request does not open a default-configured form.
+    private(set) static var reportTypes: [String] = defaultReportTypes
+
+    /// Whether the reporter should show and submit the fixed Severity choices.
+    /// Missing legacy configuration resolves to enabled.
+    private(set) static var severityEnabled = true
 
     /// Returns whether the SDK has been configured.
     ///
@@ -131,13 +139,7 @@ public enum BugScreenSDK {
 
         apiClient = APIClient(apiKey: apiKey, wrapperSdk: wrapperSdk)
 
-        if let client = apiClient {
-            // configure() is already @MainActor, so this Task inherits it; the
-            // nonisolated fetch runs off-main and only the assignment is on-main.
-            Task {
-                showBranding = await client.fetchShowBranding()
-            }
-        }
+        if let client = apiClient { loadRuntimeConfig(for: client) }
 
         if enableScreenshotDetection {
             ScreenshotObserver.shared.startObserving()
@@ -353,7 +355,10 @@ public enum BugScreenSDK {
         let hostingController = BugReportHostingController(
             host: ReporterHost(
                 submitter: DefaultBugReportSubmitter(),
-                showBranding: showBranding
+                showBranding: false,
+                configurationLoader: { forceRefresh in
+                    await loadReporterConfiguration(forceRefresh: forceRefresh)
+                }
             ),
             screenshots: screenshot.map { [$0] } ?? [],
             autoAttach: autoAttach
@@ -376,6 +381,8 @@ public enum BugScreenSDK {
     }
 
     private static func tearDown() {
+        runtimeConfigTask?.cancel()
+        runtimeConfigTask = nil
         ScreenshotObserver.shared.stopObserving()
         logger?.clear()
         logger = nil
@@ -385,6 +392,8 @@ public enum BugScreenSDK {
         user = nil
         userProvider = nil
         showBranding = false
+        reportTypes = defaultReportTypes
+        severityEnabled = true
     }
 
     #if DEBUG
@@ -397,8 +406,11 @@ public enum BugScreenSDK {
         static func configureForTesting(
             apiKey: String,
             baseURL: URL,
-            session: URLSession
+            session: URLSession,
+            runtimeConfigLoader: ((APIClient) async -> ResolvedSdkConfig)? = nil
         ) {
+            runtimeConfigTask?.cancel()
+            runtimeConfigTask = nil
             SDKLog.setEnabled(false)
             configuration = BugScreenConfiguration(
                 apiKey: apiKey,
@@ -406,11 +418,64 @@ public enum BugScreenSDK {
                 debug: false
             )
             logger = Logger(enableConsoleLogging: false)
-            apiClient = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
+            let client = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
+            apiClient = client
+            showBranding = false
+            reportTypes = defaultReportTypes
+            severityEnabled = true
+            if let runtimeConfigLoader {
+                loadRuntimeConfig(for: client, using: runtimeConfigLoader)
+            }
         }
     #endif
 
     // MARK: - Private Helpers
+
+    private static func loadRuntimeConfig(
+        for client: APIClient,
+        using loader: @escaping (APIClient) async throws -> ResolvedSdkConfig = {
+            try await $0.fetchRuntimeConfig()
+        }
+    ) {
+        runtimeConfigTask?.cancel()
+        runtimeConfigLoader = loader
+        runtimeConfigTask = Task {
+            do {
+                let runtimeConfig = try await loader(client)
+                guard !Task.isCancelled, apiClient === client else {
+                    return .failure(CancellationError())
+                }
+                showBranding = runtimeConfig.showBranding
+                reportTypes = runtimeConfig.reportTypes
+                severityEnabled = runtimeConfig.severityEnabled
+                return .success(runtimeConfig)
+            } catch {
+                guard !Task.isCancelled else { return .failure(CancellationError()) }
+                SDKLog.internalLog("⚠️ BugScreenSDK: Config fetch failed: \(error)", type: .error)
+                return .failure(error)
+            }
+        }
+    }
+
+    private static func loadReporterConfiguration(forceRefresh: Bool) async -> ReporterConfigurationResult {
+        guard let client = apiClient else { return .unavailable }
+        if forceRefresh || runtimeConfigTask == nil {
+            loadRuntimeConfig(for: client, using: runtimeConfigLoader)
+        }
+        guard let attempt = runtimeConfigTask else { return .unavailable }
+        let result = await attempt.value
+        guard apiClient === client else { return .unavailable }
+        switch result {
+        case let .success(config):
+            return .ready(ReporterConfiguration(
+                showBranding: config.showBranding,
+                reportTypes: config.reportTypes,
+                severityEnabled: config.severityEnabled
+            ))
+        case .failure:
+            return .unavailable
+        }
+    }
 
     /// Validates API key format. In DEBUG builds, an invalid `fb_` prefix
     /// traps via `precondition` to flag the programmer error early (mirrors
