@@ -7,11 +7,21 @@ struct ReporterConfiguration {
     let showBranding: Bool
     let reportTypes: [String]
     let severityEnabled: Bool
+    let videoAttachmentLimits: VideoAttachmentLimits?
+    let copy: ReporterCopy
 
-    init(showBranding: Bool, reportTypes: [String], severityEnabled: Bool = true) {
+    init(
+        showBranding: Bool,
+        reportTypes: [String],
+        severityEnabled: Bool = true,
+        videoAttachmentLimits: VideoAttachmentLimits? = nil,
+        copy: ReporterCopy = ReporterCopy()
+    ) {
         self.showBranding = showBranding
         self.reportTypes = reportTypes
         self.severityEnabled = severityEnabled
+        self.videoAttachmentLimits = videoAttachmentLimits
+        self.copy = copy
     }
 }
 
@@ -44,6 +54,29 @@ protocol BugReportSubmitting {
         type: String?,
         severity: String?
     ) async throws -> ReportReceipt
+}
+
+protocol VideoReportSubmitting: BugReportSubmitting {
+    @MainActor
+    func submitVideoBugReport(description: String, screenshots: [PreparedScreenshot], videos: [PreparedVideo],
+                              visualOrder: [ReportMediaOrder], type: String?, severity: String?) async throws -> ReportReceipt
+}
+
+protocol VideoPreparing: Sendable {
+    @MainActor
+    func poster(for source: URL) async throws -> UIImage
+    @MainActor
+    func prepare(_ source: URL, limits: VideoAttachmentLimits) async throws -> PreparedVideo
+}
+
+struct DefaultVideoPreparer: VideoPreparing {
+    func poster(for source: URL) async throws -> UIImage {
+        try await VideoPreparation.poster(for: source)
+    }
+
+    func prepare(_ source: URL, limits: VideoAttachmentLimits) async throws -> PreparedVideo {
+        try await VideoPreparation.prepare(source, limits: limits)
+    }
 }
 
 protocol PhotosPermissionRequesting {

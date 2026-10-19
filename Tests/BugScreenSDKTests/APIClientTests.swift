@@ -407,10 +407,191 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertTrue(runtimeConfig.showBranding)
         XCTAssertTrue(runtimeConfig.severityEnabled)
+        XCTAssertNil(runtimeConfig.videoAttachmentLimits)
         let request = StubURLProtocol.recordedRequests.first
         XCTAssertEqual(request?.httpMethod, "GET")
         XCTAssertEqual(request?.url?.path, "/config")
         XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer \(apiKey)")
+    }
+
+    func testRemoteWordingReachesResolvedConfigAndMalformedSuppliedCopyFails() async throws {
+        stubStatus(
+            200,
+            body: Data(#"{"appId":"app-123","showBranding":false,"reporterCopy":{"title":"Share <feedback>","successMessage":"We received your thoughts."}}"#
+                .utf8)
+        )
+        let config = try await makeClient().fetchRuntimeConfig()
+        XCTAssertEqual(config.copy.title, "Share <feedback>")
+        XCTAssertEqual(config.copy.successMessage, "We received your thoughts.")
+        XCTAssertEqual(config.copy.submitLabel, "Create ticket")
+        for copy in ["null", #"{"title":17}"#, #"{"title":" "}"#] {
+            stubStatus(200, body: Data(#"{"appId":"app-123","showBranding":false,"reporterCopy":\#(copy)}"#.utf8))
+            await XCTAssertThrowsErrorAsync(try await makeClient().fetchRuntimeConfig()) { _ in }
+        }
+    }
+
+    func testVideoLimitsAreDecodedFromConfigAndInvalidPoliciesFail() async throws {
+        stubStatus(
+            200,
+            body: Data(#"{"appId":"app-123","showBranding":false,"videoAttachmentLimits":{"maxSizeBytes":25000000,"maxDurationSeconds":120}}"#
+                .utf8)
+        )
+        let config = try await makeClient().fetchRuntimeConfig()
+        let policy = try XCTUnwrap(config.videoAttachmentLimits)
+        XCTAssertEqual(policy.maxSizeBytes, 25_000_000)
+        XCTAssertEqual(policy.maxDurationSeconds, 120)
+        for policy in [
+            #"{"maxSizeBytes":0,"maxDurationSeconds":120}"#,
+            #"{"maxSizeBytes":25000000,"maxDurationSeconds":0}"#,
+            #"{"maxSizeBytes":25000000}"#,
+        ] {
+            stubStatus(200, body: Data("{\"appId\":\"app-123\",\"showBranding\":false,\"videoAttachmentLimits\":\(policy)}".utf8))
+            await XCTAssertThrowsErrorAsync(try await makeClient().fetchRuntimeConfig()) { _ in }
+        }
+    }
+
+    func testReporterPresentationsReuseCachedConfigWithoutReconfiguringSDK() async throws {
+        var calls = 0
+        BugScreenSDK.configureForTesting(apiKey: TestHelpers.validAPIKey,
+                                         baseURL: try XCTUnwrap(URL(string: "https://stub.bugscreen.test/")),
+                                         session: StubURLProtocol.makeSession(), runtimeConfigLoader: { _ in
+                                             calls += 1
+                                             return ResolvedSdkConfig(showBranding: calls == 1, reportTypes: ["Config\(calls)"],
+                                                                      severityEnabled: calls == 1,
+                                                                      videoAttachmentLimits: VideoAttachmentLimits(
+                                                                          maxSizeBytes: Int64(calls * 10_000_000),
+                                                                          maxDurationSeconds: Double(calls * 60)
+                                                                      ), copy: ReporterCopy(
+                                                                          title: "Form \(calls)",
+                                                                          successMessage: "Thanks \(calls)"
+                                                                      ))
+                                         })
+        guard case let .ready(first) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false),
+              case let .ready(second) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false)
+        else {
+            return XCTFail("Expected configured reporters")
+        }
+        XCTAssertEqual(calls, 1)
+        for config in [first, second] {
+            XCTAssertTrue(config.showBranding)
+            XCTAssertEqual(config.reportTypes, ["Config1"])
+            XCTAssertTrue(config.severityEnabled)
+            XCTAssertEqual(config.copy.title, "Form 1")
+            XCTAssertEqual(config.copy.successMessage, "Thanks 1")
+            XCTAssertEqual(config.videoAttachmentLimits?.maxSizeBytes, 10_000_000)
+            XCTAssertEqual(config.videoAttachmentLimits?.maxDurationSeconds, 60)
+        }
+    }
+
+    func testReporterReusesInFlightStartupVideoPolicy() async throws {
+        let latch = RuntimeConfigLatch()
+        var calls = 0
+        BugScreenSDK.configureForTesting(apiKey: TestHelpers.validAPIKey,
+                                         baseURL: try XCTUnwrap(URL(string: "https://stub.bugscreen.test/")),
+                                         session: StubURLProtocol.makeSession(), runtimeConfigLoader: { _ in
+                                             calls += 1
+                                             return await latch.wait()
+                                         })
+        let reporter = Task { await BugScreenSDK.loadReporterConfiguration(forceRefresh: false) }
+        let deadline = Date().addingTimeInterval(5)
+        while calls == 0, Date() < deadline {
+            await Task.yield()
+        }
+        for _ in 0 ..< 10 {
+            await Task.yield()
+        }
+        XCTAssertEqual(calls, 1)
+        await latch.release(ResolvedSdkConfig(showBranding: false, reportTypes: defaultReportTypes,
+                                              videoAttachmentLimits: VideoAttachmentLimits(maxSizeBytes: 25_000_000,
+                                                                                           maxDurationSeconds: 120)))
+        guard case let .ready(config) = await reporter.value else { return XCTFail("Expected reporter config") }
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(config.videoAttachmentLimits?.maxSizeBytes, 25_000_000)
+        XCTAssertEqual(config.videoAttachmentLimits?.maxDurationSeconds, 120)
+    }
+
+    func testCompletedStartupConfigIsCachedBeforeFirstReporter() async throws {
+        var calls = 0
+        BugScreenSDK.configureForTesting(apiKey: TestHelpers.validAPIKey,
+                                         baseURL: try XCTUnwrap(URL(string: "https://stub.bugscreen.test/")),
+                                         session: StubURLProtocol.makeSession(), runtimeConfigLoader: { _ in
+                                             calls += 1
+                                             return ResolvedSdkConfig(showBranding: false, reportTypes: ["Config\(calls)"],
+                                                                      videoAttachmentLimits: VideoAttachmentLimits(
+                                                                          maxSizeBytes: Int64(calls * 10_000_000),
+                                                                          maxDurationSeconds: 120
+                                                                      ))
+                                         })
+        let deadline = Date().addingTimeInterval(5)
+        while BugScreenSDK.reportTypes != ["Config1"], Date() < deadline {
+            await Task.yield()
+        }
+        XCTAssertEqual(BugScreenSDK.reportTypes, ["Config1"])
+        XCTAssertEqual(calls, 1)
+        guard case let .ready(config) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false) else {
+            return XCTFail("Expected reporter configuration")
+        }
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(config.reportTypes, ["Config1"])
+        XCTAssertEqual(config.videoAttachmentLimits?.maxSizeBytes, 10_000_000)
+    }
+
+    func testFailedStartupConfigRequiresExplicitRetryAndSuccessfulRetryIsCached() async {
+        var calls = 0
+        BugScreenSDK.configureForTesting(
+            apiKey: TestHelpers.validAPIKey,
+            baseURL: stubBaseURL,
+            session: StubURLProtocol.makeSession(),
+            runtimeConfigLoader: { _ in
+                calls += 1
+                if calls == 1 { throw URLError(.notConnectedToInternet) }
+                return ResolvedSdkConfig(showBranding: false, reportTypes: ["Recovered"], severityEnabled: false,
+                                         videoAttachmentLimits: VideoAttachmentLimits(maxSizeBytes: 25_000_000, maxDurationSeconds: 120))
+            }
+        )
+        for _ in 0 ..< 2 {
+            guard case .unavailable = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false) else {
+                return XCTFail("A failed initialization must wait for explicit Retry")
+            }
+        }
+        XCTAssertEqual(calls, 1)
+        guard case let .ready(retry) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: true),
+              case let .ready(reopened) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false)
+        else { return XCTFail("Retry must recover the reporter configuration") }
+        XCTAssertEqual(calls, 2)
+        for config in [retry, reopened] {
+            XCTAssertEqual(config.reportTypes, ["Recovered"])
+            XCTAssertFalse(config.severityEnabled)
+            XCTAssertEqual(config.videoAttachmentLimits?.maxSizeBytes, 25_000_000)
+        }
+    }
+
+    func testReinitializationReplacesCompletedCachedConfig() async {
+        var calls = 0
+        func configure() {
+            BugScreenSDK.configureForTesting(
+                apiKey: TestHelpers.validAPIKey,
+                baseURL: stubBaseURL,
+                session: StubURLProtocol.makeSession(),
+                runtimeConfigLoader: { _ in
+                    calls += 1
+                    return ResolvedSdkConfig(showBranding: false, reportTypes: ["Config\(calls)"])
+                }
+            )
+        }
+        configure()
+        guard case let .ready(first) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false) else {
+            return XCTFail("Expected initial cached configuration")
+        }
+        XCTAssertEqual(first.reportTypes, ["Config1"])
+        XCTAssertEqual(calls, 1)
+        configure()
+        guard case let .ready(second) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false),
+              case let .ready(reopened) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false)
+        else { return XCTFail("Expected replacement cached configuration") }
+        XCTAssertEqual(second.reportTypes, ["Config2"])
+        XCTAssertEqual(reopened.reportTypes, ["Config2"])
+        XCTAssertEqual(calls, 2)
     }
 
     func testFetchRuntimeConfigReturnsFalseWhenServerSaysSo() async throws {
@@ -597,6 +778,27 @@ final class APIModelsTests: XCTestCase {
         XCTAssertEqual(response.partialFailures?.first?.message, "channel archived")
     }
 
+    func testBugReportResponseDecodesInboxOnlyAllFailedResponse() throws {
+        let json = """
+        {
+            "success": true,
+            "message": "Bug report submitted successfully",
+            "issueUrls": [],
+            "partialFailures": [
+                { "type": "github", "message": "provider unavailable" }
+            ]
+        }
+        """
+
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(BugReportResponse.self, from: data)
+
+        XCTAssertTrue(response.issueURLs.isEmpty)
+        XCTAssertEqual(response.partialFailures?.count, 1)
+        XCTAssertEqual(response.partialFailures?.first?.type, "github")
+        XCTAssertEqual(response.partialFailures?.first?.message, "provider unavailable")
+    }
+
     func testErrorResponseDecoding() throws {
         let json = """
         {
@@ -743,19 +945,25 @@ final class APIClientConfigurationTests: XCTestCase {
                 ResolvedSdkConfig(
                     showBranding: false,
                     reportTypes: ["Question", "Suggestion"],
-                    severityEnabled: false
+                    severityEnabled: false,
+                    copy: ReporterCopy(title: "New app", successMessage: "New acknowledgement")
                 )
             }
         )
         await Task.yield()
         await firstConfig.release(
-            ResolvedSdkConfig(showBranding: true, reportTypes: ["Old"])
+            ResolvedSdkConfig(showBranding: true, reportTypes: ["Old"], copy: ReporterCopy(title: "Old app"))
         )
         await Task.yield()
 
         XCTAssertEqual(BugScreenSDK.reportTypes, ["Question", "Suggestion"])
         XCTAssertFalse(BugScreenSDK.showBranding)
         XCTAssertFalse(BugScreenSDK.severityEnabled)
+        guard case let .ready(configuration) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false) else {
+            return XCTFail("Expected the new app's configured reporter")
+        }
+        XCTAssertEqual(configuration.copy.title, "New app")
+        XCTAssertEqual(configuration.copy.successMessage, "New acknowledgement")
     }
 }
 

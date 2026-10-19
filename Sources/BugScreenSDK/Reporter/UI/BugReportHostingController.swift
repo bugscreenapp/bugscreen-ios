@@ -31,6 +31,8 @@ final class BugReportHostingController: UIViewController,
     /// §2.5). It carries no result: whether a report was filed or the credential was rejected is the
     /// host's own to track (the companion reads it off its submitter).
     private let onFinished: (() -> Void)?
+    private let dismissReport: ((@escaping () -> Void) -> Void)?
+    private let presentSuccess: @MainActor (UIWindowScene?, [ReportPartialFailure], ReporterCopy) -> Void
     private var hasFinished = false
 
     /// - Parameters:
@@ -46,9 +48,17 @@ final class BugReportHostingController: UIViewController,
         host: ReporterHost,
         screenshots: [UIImage] = [],
         autoAttach: Bool = false,
-        onFinished: (() -> Void)? = nil
+        initialDescription: String = "",
+        onFinished: (() -> Void)? = nil,
+        dismissReport: ((@escaping () -> Void) -> Void)? = nil,
+        presentSuccess: @escaping @MainActor (UIWindowScene?, [ReportPartialFailure], ReporterCopy) -> Void = { scene, partials, copy in
+            guard let scene else { return }
+            SuccessToastPresenter.show(on: scene, partialFailures: partials, copy: copy)
+        }
     ) {
         self.onFinished = onFinished
+        self.dismissReport = dismissReport
+        self.presentSuccess = presentSuccess
         // Build the VM up front (without callbacks that capture `self`) so the
         // hosting controller owns it and can read `isDirty` from the UIKit
         // dismiss-delegate callbacks. Real callbacks are wired via `bind`
@@ -68,21 +78,21 @@ final class BugReportHostingController: UIViewController,
             configurationLoader: host.configurationLoader
         )
         vm.addScreenshots(Array(screenshots.dropFirst()))
+        vm.description = initialDescription
         viewModel = vm
         content = UIHostingController(rootView: BugReportView(viewModel: vm))
         super.init(nibName: nil, bundle: nil)
 
         vm.bind(
             onDismiss: { [weak self] in
-                self?.dismiss(animated: true) { self?.finishOnce() }
+                self?.performDismissal { self?.finishOnce() }
             },
             onSuccess: { [weak self] (partials: [ReportPartialFailure]) in
                 guard let self else { return }
                 let hostScene = view.window?.windowScene
-                dismiss(animated: true) {
-                    if let scene = hostScene {
-                        SuccessToastPresenter.show(on: scene, partialFailures: partials)
-                    }
+                let reportCopy = viewModel.copy
+                performDismissal {
+                    self.presentSuccess(hostScene, partials, reportCopy)
                     self.finishOnce()
                 }
             }
@@ -121,12 +131,29 @@ final class BugReportHostingController: UIViewController,
         content.didMove(toParent: self)
     }
 
-    /// Fires the host's completion exactly once, whichever way the reporter was dismissed —
-    /// filed, cancelled, discarded, or swiped away.
+    private func performDismissal(_ completion: @escaping () -> Void) {
+        if let dismissReport {
+            dismissReport(completion)
+            return
+        }
+        dismiss(animated: true, completion: completion)
+    }
+
+    /// Fires the host's completion exactly once, whichever way the reporter was dismissed.
     private func finishOnce() {
         guard !hasFinished else { return }
+        viewModel.cleanupVideos()
         hasFinished = true
         onFinished?()
+    }
+
+    func dismissFromHost() {
+        guard let owner = presentingViewController else {
+            finishOnce()
+            return
+        }
+        // The reporter may itself present the picker or annotation UI; dismiss the whole stack.
+        owner.dismiss(animated: true) { self.finishOnce() }
     }
 
     // MARK: - UIAdaptivePresentationControllerDelegate
@@ -143,7 +170,7 @@ final class BugReportHostingController: UIViewController,
     }
 
     func presentationControllerDidAttemptToDismiss(_: UIPresentationController) {
-        guard viewModel.submissionState != .submitting else { return }
+        guard viewModel.submissionState != .submitting, !viewModel.isPreparingMedia else { return }
         guard viewModel.configurationState == .ready else { return }
         presentDiscardConfirmation()
     }
@@ -192,7 +219,8 @@ private enum SuccessToastPresenter {
     static func show(
         on scene: UIWindowScene,
         partialFailures: [ReportPartialFailure] = [],
-        duration: TimeInterval? = nil
+        duration: TimeInterval? = nil,
+        copy: ReporterCopy
     ) {
         // Partial failures need time to read and expand the disclosure;
         // the clean success path stays at the short toast duration.
@@ -212,7 +240,7 @@ private enum SuccessToastPresenter {
         container.backgroundColor = .clear
         rootVC.view = container
 
-        let host = UIHostingController(rootView: SuccessToastOverlay(partialFailures: partialFailures))
+        let host = UIHostingController(rootView: SuccessToastOverlay(copy: copy, partialFailures: partialFailures))
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
         rootVC.addChild(host)
@@ -261,11 +289,12 @@ private final class PassthroughContainerView: UIView {
 /// spring-in. Sized by the parent hosting controller's auto-layout
 /// constraints, so the UIView host follows the toast's content height.
 private struct SuccessToastOverlay: View {
+    let copy: ReporterCopy
     let partialFailures: [ReportPartialFailure]
     @State private var visible = false
 
     var body: some View {
-        SuccessToast(partialFailures: partialFailures)
+        SuccessToast(partialFailures: partialFailures, copy: copy)
             .padding(.horizontal, 14)
             .padding(.top, 16)
             .opacity(visible ? 1 : 0)

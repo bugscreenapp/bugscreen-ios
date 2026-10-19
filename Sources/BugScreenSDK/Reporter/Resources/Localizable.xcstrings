@@ -2,6 +2,16 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "attachment.processing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attachment processing"
+          }
+        }
+      }
+    },
     "discard.dialog.confirm": {
       "extractionState": "manual",
       "localizations": {
@@ -349,7 +359,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open preview"
+            "value": "Open preview for attachment %d"
           }
         }
       }
@@ -415,7 +425,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add a short description of the issue."
+            "value": "Add a short description."
           }
         }
       }
@@ -449,6 +459,216 @@
           "stringUnit": {
             "state": "translated",
             "value": "You can attach up to 4 screenshots."
+          }
+        }
+      }
+    },
+    "video.invalid": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video could not be attached. Choose a shorter or smaller MP4 or MOV video."
+          }
+        }
+      }
+    },
+    "video.limits": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Up to 4 images or videos"
+          }
+        }
+      }
+    },
+    "video.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video unavailable. Close the preview and try again."
+          }
+        }
+      }
+    },
+    "video.duration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld seconds"
+          }
+        }
+      }
+    },
+    "video.play": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play video"
+          }
+        }
+      }
+    },
+    "video.pause": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause video"
+          }
+        }
+      }
+    },
+    "video.seek": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video position"
+          }
+        }
+      }
+    },
+    "video.preview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview video %lld, %lld seconds"
+          }
+        }
+      }
+    },
+    "video.failure.configuration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video settings are unavailable. Reload the reporter and try again."
+          }
+        }
+      }
+    },
+    "video.failure.import": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected video could not be read or copied. Download it to this device and try again."
+          }
+        }
+      }
+    },
+    "video.failure.container": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file is not an MP4 or MOV video. Choose an MP4 or MOV file."
+          }
+        }
+      }
+    },
+    "video.failure.empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video file is empty. Choose another recording."
+          }
+        }
+      }
+    },
+    "video.failure.encoding": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device could not encode the video as H.264 MP4. Try another recording."
+          }
+        }
+      }
+    },
+    "video.failure.preview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A preview could not be created for this video. Try another recording."
+          }
+        }
+      }
+    },
+    "video.failure.tooLarge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The processed video is %1$.2f MB (%2$lld bytes). The limit is %3$.2f MB (%4$lld bytes). Choose a smaller video."
+          }
+        }
+      }
+    },
+    "video.failure.tooLong": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video is %1$.2f seconds long. The limit is %2$.2f seconds. Choose a shorter video."
+          }
+        }
+      }
+    },
+    "video.failure.duration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video duration could not be read or is zero. Choose another recording."
+          }
+        }
+      }
+    },
+    "video.failure.decode": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video could not be decoded. It may be damaged or use an unsupported encoding."
+          }
+        }
+      }
+    },
+    "video.failure.processing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video could not be processed. Try another recording."
+          }
+        }
+      }
+    },
+    "video.failure.resolution": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video dimensions are invalid or exceed the supported resolution."
+          }
+        }
+      }
+    },
+    "video.failure.track": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file must contain exactly one video track. Choose an MP4 or MOV video."
           }
         }
       }

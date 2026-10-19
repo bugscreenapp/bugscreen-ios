@@ -30,6 +30,16 @@ final class BugReportHostingControllerTests: XCTestCase {
         let controller = makeController(screenshots: [])
 
         XCTAssertTrue(controller.viewModel.screenshots.isEmpty)
+        XCTAssertTrue(controller.viewModel.description.isEmpty)
+    }
+
+    func testInitialDescriptionStaysEditableAfterConfigurationLoads() async {
+        let controller = makeController(screenshots: [], initialDescription: "Example report")
+        XCTAssertEqual(controller.viewModel.description, "Example report")
+        controller.viewModel.description = "Edited example"
+        controller.viewModel.onAppear(presenter: UIViewController())
+        await flushMainTasks()
+        XCTAssertEqual(controller.viewModel.description, "Edited example")
     }
 
     /// The SDK's single screenshot is its window-snapshot fallback, which the higher-quality OS
@@ -51,9 +61,47 @@ final class BugReportHostingControllerTests: XCTestCase {
         XCTAssertIdentical(controller.viewModel.screenshots.first, upgrade)
     }
 
+    func testOpenedAcknowledgementSnapshotSurvivesDismissal() async {
+        let original = ReporterCopy(
+            title: "Share feedback",
+            successTitle: "Feedback received",
+            successMessage: "Thank you for your thoughts."
+        )
+        var configuredCopy = original
+        var dismissal: (() -> Void)?
+        var acknowledgement: ReporterCopy?
+        var finishes = 0
+        let controller = BugReportHostingController(
+            host: ReporterHost(submitter: FakeBugReportSubmitter(), showBranding: false, configurationLoader: { _ in
+                .ready(ReporterConfiguration(showBranding: false, reportTypes: defaultReportTypes, copy: configuredCopy))
+            }),
+            onFinished: { finishes += 1 },
+            dismissReport: { dismissal = $0 },
+            presentSuccess: { _, partials, copy in
+                XCTAssertTrue(partials.isEmpty)
+                acknowledgement = copy
+            }
+        )
+        controller.viewModel.loadConfigurationIfNeeded()
+        await flushMainTasks()
+        controller.viewModel.description = "Please add a search filter"
+        await controller.viewModel.submit()
+        XCTAssertNotNil(dismissal)
+        XCTAssertNil(acknowledgement)
+        XCTAssertEqual(finishes, 0)
+        configuredCopy = ReporterCopy(successTitle: "Different app", successMessage: "Changed during dismissal")
+        controller.viewModel.retryConfiguration()
+        await flushMainTasks()
+        XCTAssertEqual(controller.viewModel.copy.successTitle, "Different app")
+        dismissal?()
+        XCTAssertEqual(acknowledgement?.values, original.values)
+        XCTAssertEqual(finishes, 1)
+    }
+
     private func makeController(
         screenshots: [UIImage],
         autoAttach: Bool = false,
+        initialDescription: String = "",
         permission: PhotosPermissionRequesting = FakePhotosPermission(outcome: .denied),
         locator: ScreenshotLocating = FakeScreenshotLocator(result: nil)
     ) -> BugReportHostingController {
@@ -65,7 +113,8 @@ final class BugReportHostingControllerTests: XCTestCase {
                 showBranding: false
             ),
             screenshots: screenshots,
-            autoAttach: autoAttach
+            autoAttach: autoAttach,
+            initialDescription: initialDescription
         )
     }
 

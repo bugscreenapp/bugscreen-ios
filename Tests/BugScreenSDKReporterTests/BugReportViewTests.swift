@@ -204,6 +204,79 @@ final class BugReportViewTests: XCTestCase {
         XCTAssertThrowsError(try sut.inspect().find(text: "ATTACHMENTS · 0 OF 4"))
     }
 
+    func testThumbnailHasOneNumberedPreviewActionWithDecorativePencil() throws {
+        let view = try BugReportView(viewModel: makeViewModel(screenshot: UIImage())).inspect()
+        let row = try view.find(ViewType.ScrollView.self, where: { try $0.axes() == .horizontal })
+        let buttons = row.findAll(ViewType.Button.self)
+
+        XCTAssertEqual(buttons.count, 2, "one preview button and Add; the pencil is not a button")
+        let thumbnail = try row.find(ViewType.Button.self, where: {
+            try $0.accessibilityLabel().string() == "Open preview for attachment 1"
+        })
+        XCTAssertFalse(try thumbnail.isDisabled())
+        XCTAssertEqual(try thumbnail.labelView().fixedWidth(), 112)
+        XCTAssertEqual(try thumbnail.labelView().fixedHeight(), 112)
+        XCTAssertNoThrow(try thumbnail.labelView().find(ViewType.Image.self, where: {
+            try $0.actualImage().name() == "pencil"
+        }))
+        for image in try thumbnail.labelView().findAll(ViewType.Image.self) {
+            XCTAssertTrue(try image.accessibilityHidden(), "thumbnail images are decorative children of the preview button")
+        }
+    }
+
+    func testFourAttachmentsRemainInTheHorizontalRowWithoutAdd() throws {
+        let viewModel = makeViewModel(screenshot: UIImage())
+        viewModel.addScreenshots([UIImage(), UIImage(), UIImage()])
+        let view = try BugReportView(viewModel: viewModel).inspect()
+        let row = try view.find(ViewType.ScrollView.self, where: { try $0.axes() == .horizontal })
+
+        XCTAssertEqual(row.findAll(ViewType.Button.self).count, 4)
+        for number in 1 ... 4 {
+            XCTAssertNoThrow(try row.find(ViewType.Button.self, where: {
+                try $0.accessibilityLabel().string() == "Open preview for attachment \(number)"
+            }))
+        }
+        XCTAssertThrowsError(try row.find(button: "Add"))
+    }
+
+    func testSubmittingDisablesThumbnailAndAdd() throws {
+        let viewModel = makeViewModel(screenshot: UIImage())
+        viewModel.submissionState = .submitting
+        let row = try BugReportView(viewModel: viewModel).inspect()
+            .find(ViewType.ScrollView.self, where: { try $0.axes() == .horizontal })
+
+        for button in row.findAll(ViewType.Button.self) {
+            XCTAssertTrue(try button.isDisabled())
+        }
+    }
+
+    func testConfiguredCopyRendersLiterallyAndPartialDeliveryKeepsItsWarning() async throws {
+        let copy = ReporterCopy(title: "Share <feedback>", descriptionLabel: "Your thoughts?",
+                                descriptionPlaceholder: "Tell us more…", typeLabel: "Feedback type",
+                                submitLabel: "Send feedback", successTitle: "Received!", successMessage: "Thank you for your feedback.")
+        let vm = BugReportViewModel(onDismiss: {}, submitter: FakeBugReportSubmitter(),
+                                    configurationLoader: { _ in .ready(ReporterConfiguration(
+                                        showBranding: false,
+                                        reportTypes: ["Question", "Suggestion"],
+                                        copy: copy
+                                    )) })
+        vm.loadConfigurationIfNeeded()
+        for _ in 0 ..< 8 {
+            await Task.yield()
+        }
+        let form = try BugReportView(viewModel: vm).inspect()
+        for text in [copy.title, copy.descriptionLabel, copy.descriptionPlaceholder, copy.typeLabel] {
+            XCTAssertNoThrow(try form.find(text: text))
+        }
+        XCTAssertNoThrow(try form.find(button: copy.submitLabel))
+        let success = try SuccessToast(copy: copy).inspect()
+        XCTAssertNoThrow(try success.find(text: copy.successTitle))
+        XCTAssertNoThrow(try success.find(text: copy.successMessage))
+        let partial = try SuccessToast(partialFailures: [ReportPartialFailure(type: "slack", message: "Unavailable")], copy: copy).inspect()
+        XCTAssertNoThrow(try partial.find(text: SDKStrings.successPartialTitle))
+        XCTAssertThrowsError(try partial.find(text: copy.successTitle))
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel(

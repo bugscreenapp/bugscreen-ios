@@ -112,8 +112,8 @@ enum SDKStrings {
         localized("preview.delete")
     }
 
-    static var previewOpen: String {
-        localized("preview.open")
+    static func previewOpen(_ attachmentNumber: Int) -> String {
+        String(format: localized("preview.open"), attachmentNumber)
     }
 
     /// "N of M" attachment counter shown in the preview's top chrome.
@@ -167,6 +167,54 @@ enum SDKStrings {
 
     static var markupInk: String {
         localized("markup.ink")
+    }
+
+    static func videoDuration(_ seconds: Int) -> String {
+        String(format: localized("video.duration"), seconds)
+    }
+
+    static func videoPreview(_ index: Int, _ seconds: Int) -> String {
+        String(format: localized("video.preview"), index, seconds)
+    }
+
+    static var videoPlay: String {
+        localized("video.play")
+    }
+
+    static var attachmentProcessing: String {
+        localized("attachment.processing")
+    }
+
+    static var videoPause: String {
+        localized("video.pause")
+    }
+
+    static var videoSeek: String {
+        localized("video.seek")
+    }
+
+    static func videoFailure(_ reason: String) -> String {
+        localized("video.failure.\(reason)")
+    }
+
+    static func videoDurationExceeded(_ actual: Double, limit: Double) -> String {
+        String(format: localized("video.failure.tooLong"), actual, limit)
+    }
+
+    static func videoSizeExceeded(_ actual: Int64, limit: Int64) -> String {
+        String(format: localized("video.failure.tooLarge"), Double(actual) / 1_000_000, actual, Double(limit) / 1_000_000, limit)
+    }
+
+    static var videoInvalid: String {
+        localized("video.invalid")
+    }
+
+    static var videoLimits: String {
+        localized("video.limits")
+    }
+
+    static var videoUnavailable: String {
+        localized("video.unavailable")
     }
 
     private static func localized(_ key: String) -> String {

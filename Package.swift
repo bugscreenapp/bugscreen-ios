@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "BugScreenSDK",
     platforms: [
-        .iOS(.v15)
+        .iOS(.v15),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -44,7 +44,7 @@ let package = Package(
                 // out of it deliberately: it declares the boot-time API *this* target makes,
                 // which is not the companion's to claim.
                 .process("Resources"),
-                .process("Reporter/Resources")
+                .process("Reporter/Resources"),
             ]
         ),
         .target(
@@ -69,7 +69,8 @@ let package = Package(
                 "BugScreenSDK",
                 .product(name: "ViewInspector", package: "ViewInspector"),
             ],
-            path: "Tests/BugScreenSDKReporterTests"
+            path: "Tests/BugScreenSDKReporterTests",
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "BugScreenSDKNoOpTests",

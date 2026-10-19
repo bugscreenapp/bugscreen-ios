@@ -8,7 +8,23 @@ import UIKit
 /// arrives through here. The companion app supplies its own implementation, backed by a
 /// device credential and metadata with no app-under-test context — same reporter,
 /// different host.
-struct DefaultBugReportSubmitter: BugReportSubmitting {
+struct DefaultBugReportSubmitter: VideoReportSubmitting {
+    @MainActor
+    func submitVideoBugReport(description: String, screenshots: [PreparedScreenshot], videos: [PreparedVideo],
+                              visualOrder: [ReportMediaOrder], type: String?, severity: String?) async throws -> ReportReceipt
+    {
+        guard let apiClient = BugScreenSDK.apiClient else { throw BugScreenSDKError.notConfigured }
+        let customData = BugScreenSDK.resolveReportCustomData()
+        let metadata = MetadataCollector.collect(customData: customData.isEmpty ? nil : customData)
+        let logFile = BugScreenSDK.logger?.exportToFile()
+        defer { if let logFile { try? FileManager.default.removeItem(at: logFile) } }
+        let response = try await apiClient.submitBugReport(description: description, metadata: metadata, screenshots: screenshots,
+                                                           type: type, severity: severity, logFile: logFile, videos: videos,
+                                                           visualOrder: visualOrder)
+        return ReportReceipt(partialFailures: (response.partialFailures ?? [])
+            .map { ReportPartialFailure(type: $0.type, message: $0.message) })
+    }
+
     @MainActor
     func submitBugReport(
         description: String,
@@ -16,35 +32,13 @@ struct DefaultBugReportSubmitter: BugReportSubmitting {
         type: String?,
         severity: String?
     ) async throws -> ReportReceipt {
-        guard let apiClient = BugScreenSDK.apiClient else {
-            throw BugScreenSDKError.notConfigured
-        }
-
-        let customData = BugScreenSDK.resolveReportCustomData()
-        let metadata = MetadataCollector.collect(
-            customData: customData.isEmpty ? nil : customData
-        )
-        let logFile = BugScreenSDK.logger?.exportToFile()
-
-        let response = try await apiClient.submitBugReport(
+        try await submitVideoBugReport(
             description: description,
-            metadata: metadata,
             screenshots: screenshots,
+            videos: [],
+            visualOrder: [],
             type: type,
-            severity: severity,
-            logFile: logFile
-        )
-
-        if let logFile {
-            try? FileManager.default.removeItem(at: logFile)
-        }
-
-        // BugReportResponse is public and pinned in api/BugScreenSDK.api.json, so it stays
-        // here and the mapping to the reporter's own type happens on this side of the seam.
-        return ReportReceipt(
-            partialFailures: (response.partialFailures ?? []).map {
-                ReportPartialFailure(type: $0.type, message: $0.message)
-            }
+            severity: severity
         )
     }
 }

@@ -1,6 +1,8 @@
+import AVKit
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// SwiftUI view for submitting bug reports.
 ///
@@ -51,7 +53,7 @@ struct BugReportView: View {
                             .accessibilityLabel("Reported with BugScreen")
                     }
 
-                    Text("Report an issue")
+                    Text(viewModel.copy.title)
                         .font(.system(size: 22, weight: .semibold))
                         .trackingCompat(-0.4)
                         .foregroundColor(Brand.ink)
@@ -59,6 +61,8 @@ struct BugReportView: View {
                     DescriptionField(
                         text: $viewModel.description,
                         focused: $descriptionFocused,
+                        label: viewModel.copy.descriptionLabel,
+                        placeholder: viewModel.copy.descriptionPlaceholder,
                         enabled: viewModel.submissionState != .submitting
                     )
                     if let validation = viewModel.descriptionValidationMessage {
@@ -69,7 +73,7 @@ struct BugReportView: View {
                     }
 
                     if !viewModel.reportTypes.isEmpty {
-                        Section(label: "Type") {
+                        Section(label: viewModel.copy.typeLabel, uppercase: false) {
                             TypeChipRow(options: viewModel.reportTypes, selection: $viewModel.bugType)
                         }
                     }
@@ -82,11 +86,15 @@ struct BugReportView: View {
 
                     // The label carries the cap so the tester reads it before running into it,
                     // rather than discovering it when the Add tile disappears (CAP-004).
-                    Section(label: "Attachments · \(viewModel.screenshots.count) of \(BugReportViewModel.maxScreenshots)") {
+                    Section(label: "Attachments · \(viewModel.attachmentCount) of \(BugReportViewModel.maxScreenshots)") {
+                        if viewModel.supportsVideoAttachments { Text(SDKStrings.videoLimits).font(.system(size: 12)) }
                         AttachmentRow(
                             screenshots: viewModel.screenshots,
+                            videos: viewModel.videos,
+                            isPreparing: viewModel.isPreparingMedia,
+                            pendingAttachments: viewModel.pendingAttachments,
                             canAddMore: viewModel.canAddMoreScreenshots,
-                            enabled: viewModel.submissionState != .submitting,
+                            enabled: viewModel.submissionState != .submitting && !viewModel.isPreparingMedia,
                             onAdd: { showPhotoPicker = true },
                             onOpen: { previewIndex = $0 }
                         )
@@ -106,9 +114,12 @@ struct BugReportView: View {
             }
         }
         .sheet(isPresented: $showPhotoPicker) {
-            PhotoPickerSheet(selectionLimit: max(1, viewModel.remainingScreenshotSlots)) { images in
-                viewModel.addScreenshots(images)
-            }
+            PhotoPickerSheet(
+                selectionLimit: max(1, viewModel.remainingScreenshotSlots),
+                includeVideos: viewModel.supportsVideoAttachments,
+                onImportStarted: { viewModel.beginMediaImport(count: $0) },
+                onPicked: { picked in viewModel.finishMediaImport(picked) }
+            )
         }
         .fullScreenCover(isPresented: Binding(
             get: { previewIndex != nil },
@@ -162,6 +173,7 @@ struct BugReportView: View {
                 ErrorSnackbar(error: error)
             }
             CreateTicketButton(
+                label: viewModel.copy.submitLabel,
                 isLoading: viewModel.submissionState == .submitting,
                 enabled: viewModel.canSubmit,
                 onTap: {
@@ -204,11 +216,12 @@ struct BugReportView: View {
 
 private struct Section<Content: View>: View {
     let label: String
+    var uppercase: Bool = true
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(label.uppercased())
+            Text(uppercase ? label.uppercased() : label)
                 .font(.system(size: 12, weight: .semibold))
                 .trackingCompat(0.6)
                 .foregroundColor(Brand.warm500)
@@ -220,18 +233,20 @@ private struct Section<Content: View>: View {
 private struct DescriptionField: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
+    let label: String
+    let placeholder: String
     let enabled: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("WHAT HAPPENED?")
+            Text(label)
                 .font(.system(size: 12, weight: .semibold))
                 .trackingCompat(0.6)
                 .foregroundColor(Brand.warm500)
 
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
-                    Text("Describe the bug")
+                    Text(placeholder)
                         .font(.system(size: 15))
                         .foregroundColor(Brand.warm400)
                         .padding(.horizontal, 14)
@@ -240,6 +255,7 @@ private struct DescriptionField: View {
                 }
                 TextEditor(text: $text)
                     .focused(focused)
+                    .accessibilityLabel(label)
                     .disabled(!enabled)
                     .font(.system(size: 15))
                     .foregroundColor(Brand.warm700)
@@ -357,58 +373,108 @@ private struct SeverityPill: View {
 
 private struct AttachmentRow: View {
     let screenshots: [UIImage]
+    var videos: [Int: PreparedVideo] = [:]
+    var isPreparing = false
+    var pendingAttachments: [PendingAttachment] = []
     let canAddMore: Bool
     let enabled: Bool
     let onAdd: () -> Void
     let onOpen: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(Array(screenshots.enumerated()), id: \.offset) { index, image in
-                AttachmentThumb(image: image, enabled: enabled) {
-                    onOpen(index)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(screenshots.enumerated()), id: \.offset) { index, image in
+                    AttachmentThumb(image: image, attachmentNumber: index + 1, enabled: enabled, video: videos[index]) {
+                        onOpen(index)
+                    }
                 }
-            }
-            if canAddMore {
-                AddTile(enabled: enabled, onTap: onAdd)
+                ForEach(Array(pendingAttachments.enumerated()), id: \.element.id) { index, attachment in
+                    AttachmentThumb(image: attachment.image ?? UIImage(), attachmentNumber: screenshots.count + index + 1,
+                                    enabled: false, video: attachment.video, isPreparing: attachment.isPreparing, onOpen: {})
+                }
+                if !isPreparing, canAddMore {
+                    AddTile(enabled: enabled, onTap: onAdd)
+                }
             }
         }
     }
 }
 
-/// Tapping a thumbnail opens the full-screen preview; removal moved into the
-/// preview's Delete button, so the thumbnail carries only an expand affordance.
-private struct AttachmentThumb: View {
+/// The pencil advertises the preview's Markup action; the whole tile still opens preview.
+struct AttachmentThumb: View {
     let image: UIImage
+    let attachmentNumber: Int
     let enabled: Bool
+    var video: PreparedVideo?
+    var isPreparing = false
     let onOpen: () -> Void
 
     var body: some View {
-        Button(action: onOpen) {
-            ZStack(alignment: .bottomTrailing) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 72, height: 72)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Brand.cream100, lineWidth: 1)
-                    )
-
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 18, height: 18)
-                    .background(Color.black.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .padding(4)
-            }
-            .frame(width: 72, height: 72)
+        if isPreparing {
+            thumbnail
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(SDKStrings.attachmentProcessing)
+        } else {
+            Button(action: onOpen) { thumbnail }
+                .buttonStyle(.plain)
+                .disabled(!enabled)
+                .accessibilityLabel(video.map {
+                    SDKStrings.videoPreview(attachmentNumber, Int(ceil($0.durationSeconds)))
+                } ?? SDKStrings.previewOpen(attachmentNumber))
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(SDKStrings.previewOpen)
+    }
+
+    private var thumbnail: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 112, height: 112)
+                .background(Brand.cream50)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Brand.cream100, lineWidth: 1)
+                )
+                .accessibilityHidden(true)
+
+            if !isPreparing {
+                Image(systemName: video == nil ? "pencil" : "play")
+                    .resizable()
+                    .scaledToFit()
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(Brand.onPrimary)
+                    .frame(width: 18, height: 18)
+                    .frame(width: 36, height: 36)
+                    .background(Brand.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Brand.paper, lineWidth: 2)
+                    )
+                    .padding(8)
+                    .accessibilityHidden(true)
+            }
+        }
+        .overlay {
+            if isPreparing {
+                ProgressView()
+                    .tint(Brand.accent)
+                    .padding(12)
+                    .background(Brand.paper.opacity(0.9))
+                    .clipShape(Circle())
+                    .accessibilityHidden(true)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let video {
+                Text(SDKStrings.videoDuration(Int(ceil(video.durationSeconds)))).font(.system(size: 11)).padding(4)
+                    .background(Color.black.opacity(0.6)).foregroundColor(.white)
+            }
+        }
+        .frame(width: 112, height: 112)
+        .contentShape(Rectangle())
     }
 }
 
@@ -426,7 +492,7 @@ func nextPreviewIndex(afterDeleting deletedIndex: Int, newCount: Int) -> Int? {
     newCount <= 0 ? nil : min(deletedIndex, newCount - 1)
 }
 
-private struct AttachmentPreview: View {
+struct AttachmentPreview: View {
     @ObservedObject var viewModel: BugReportViewModel
     @State private var index: Int
     /// When set, the editor is swapped in over the preview for that attachment
@@ -456,7 +522,7 @@ private struct AttachmentPreview: View {
 
     var body: some View {
         ZStack {
-            if let markupIndex, viewModel.screenshots.indices.contains(markupIndex) {
+            if let markupIndex, viewModel.videos[markupIndex] == nil, viewModel.screenshots.indices.contains(markupIndex) {
                 MarkupEditorView(
                     image: viewModel.screenshots[markupIndex],
                     onCancel: { self.markupIndex = nil },
@@ -480,7 +546,6 @@ private struct AttachmentPreview: View {
                 VStack(spacing: 0) {
                     topChrome
                     stage
-                    markupEntryButton
                     if count > 1 {
                         dots
                     }
@@ -499,9 +564,9 @@ private struct AttachmentPreview: View {
     /// Accent-filled rather than the preview's usual translucent chip: markup is the
     /// one action on this screen worth advertising, and a glass chip beside a glass
     /// Close read as chrome rather than an invitation (CAP-016).
-    private var markupEntryButton: some View {
+    private func markupEntryButton(for attachmentIndex: Int) -> some View {
         Button {
-            markupIndex = index
+            markupIndex = attachmentIndex
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "pencil.and.outline")
@@ -557,13 +622,21 @@ private struct AttachmentPreview: View {
     private var stage: some View {
         TabView(selection: $index) {
             ForEach(Array(viewModel.screenshots.enumerated()), id: \.offset) { i, image in
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 16)
-                    .tag(i)
+                VStack(spacing: 0) {
+                    Group {
+                        if let video = viewModel.videos[i] {
+                            NativeVideoPreview(url: video.file, isActive: i == index).id(video.file)
+                        } else {
+                            Image(uiImage: image).resizable().scaledToFit()
+                                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                        }
+                    }.padding(.horizontal, 16).padding(.vertical, 16)
+                    if viewModel.videos[i] == nil {
+                        markupEntryButton(for: i)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .tag(i)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -613,7 +686,7 @@ private struct AddTile: View {
                     .font(.system(size: 11, weight: .medium))
             }
             .foregroundColor(Brand.warm500)
-            .frame(width: 72, height: 72)
+            .frame(width: 112, height: 112)
             .background(Brand.cream50)
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -630,6 +703,7 @@ private struct AddTile: View {
 }
 
 private struct CreateTicketButton: View {
+    let label: String
     let isLoading: Bool
     let enabled: Bool
     let onTap: () -> Void
@@ -641,11 +715,15 @@ private struct CreateTicketButton: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: Brand.onPrimary))
                 } else {
-                    Text("Create ticket")
+                    Text(label)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Brand.onPrimary)
                 }
             }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(enabled || isLoading ? Brand.primary : Brand.warm600)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -653,6 +731,7 @@ private struct CreateTicketButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled || isLoading)
+        .accessibilityLabel(label)
     }
 }
 
@@ -700,10 +779,12 @@ private struct ErrorSnackbar: View {
 /// transient post-dismiss window.
 struct SuccessToast: View {
     let partialFailures: [ReportPartialFailure]
+    let copy: ReporterCopy
     @State private var detailsVisible = false
 
-    init(partialFailures: [ReportPartialFailure] = []) {
+    init(partialFailures: [ReportPartialFailure] = [], copy: ReporterCopy = ReporterCopy()) {
         self.partialFailures = partialFailures
+        self.copy = copy
     }
 
     private var hasPartials: Bool {
@@ -721,10 +802,10 @@ struct SuccessToast: View {
                     .foregroundColor(Brand.onPrimary)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(hasPartials ? SDKStrings.successPartialTitle : SDKStrings.successTitle)
+                Text(hasPartials ? SDKStrings.successPartialTitle : copy.successTitle)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Brand.ink)
-                Text(hasPartials ? SDKStrings.successPartialMessage : SDKStrings.successMessage)
+                Text(hasPartials ? SDKStrings.successPartialMessage : copy.successMessage)
                     .font(.system(size: 13))
                     .foregroundColor(Brand.warm500)
                     .fixedSize(horizontal: false, vertical: true)
@@ -863,9 +944,9 @@ private extension Text {
 /// `PHPickerViewController` cannot be driven from a unit test, and two of its settings carry
 /// behaviour worth asserting rather than assuming.
 enum PhotoPickerConfiguration {
-    static func make(selectionLimit: Int) -> PHPickerConfiguration {
+    static func make(selectionLimit: Int, includeVideos: Bool = false) -> PHPickerConfiguration {
         var config = PHPickerConfiguration(photoLibrary: .shared())
-        config.filter = .images
+        config.filter = includeVideos ? .any(of: [.images, .videos]) : .images
         // The caller passes the *remaining* slots, so the picker stops the tester at the cap
         // instead of accepting a selection the form would silently trim (CAP-004).
         config.selectionLimit = selectionLimit
@@ -879,14 +960,19 @@ enum PhotoPickerConfiguration {
 
 /// Multi-image picker that works on iOS 15+ via `PHPickerViewController`.
 /// SwiftUI's `PhotosPicker` would be simpler but is iOS 16+.
-private struct PhotoPickerSheet: UIViewControllerRepresentable {
+struct PhotoPickerSheet: UIViewControllerRepresentable {
     let selectionLimit: Int
-    let onPicked: ([UIImage]) -> Void
+    var includeVideos = false
+    var onImportStarted: (Int) -> Void = { _ in }
+    let onPicked: ([PickedAttachment]) -> Void
 
     @Environment(\.presentationMode) private var presentationMode
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
-        let picker = PHPickerViewController(configuration: PhotoPickerConfiguration.make(selectionLimit: selectionLimit))
+        let picker = PHPickerViewController(configuration: PhotoPickerConfiguration.make(
+            selectionLimit: selectionLimit,
+            includeVideos: includeVideos
+        ))
         picker.delegate = context.coordinator
         return picker
     }
@@ -899,28 +985,46 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
         private let parent: PhotoPickerSheet
+        private let itemProviders: ([PHPickerResult]) -> [NSItemProvider]
 
-        init(_ parent: PhotoPickerSheet) {
+        init(_ parent: PhotoPickerSheet, itemProviders: @escaping ([PHPickerResult]) -> [NSItemProvider] = { $0.map(\.itemProvider) }) {
             self.parent = parent
+            self.itemProviders = itemProviders
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            let providers = itemProviders(results)
+            if !providers.isEmpty { parent.onImportStarted(providers.count) }
             picker.dismiss(animated: true)
-            guard !results.isEmpty else { return }
+            guard !providers.isEmpty else { return }
 
             let group = DispatchGroup()
-            var images: [(Int, UIImage)] = []
+            var images: [(Int, PickedAttachment)] = []
             let lock = NSLock()
 
-            for (index, result) in results.enumerated() {
-                let provider = result.itemProvider
+            for (index, provider) in providers.enumerated() {
+                if parent.includeVideos, provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+                    group.enter()
+                    provider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, _ in
+                        defer { group.leave() }
+                        let selected: PickedAttachment
+                        do {
+                            guard let url else { throw VideoPreparationError.importing }
+                            selected = .video(try VideoPreparation.copySelection(url))
+                        } catch {
+                            selected = .unavailable(error as? VideoPreparationError ?? .importing)
+                        }
+                        lock.lock(); images.append((index, selected)); lock.unlock()
+                    }
+                    continue
+                }
                 guard provider.canLoadObject(ofClass: UIImage.self) else { continue }
                 group.enter()
                 provider.loadObject(ofClass: UIImage.self) { object, _ in
                     defer { group.leave() }
                     if let image = object as? UIImage {
                         lock.lock()
-                        images.append((index, image))
+                        images.append((index, .image(image)))
                         lock.unlock()
                     }
                 }

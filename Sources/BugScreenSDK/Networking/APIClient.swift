@@ -21,6 +21,7 @@ final class APIClient {
 
     /// URLSession for making network requests
     private let session: URLSession
+    private let videoUploader: VideoUploadClient
 
     // MARK: - Initialization
 
@@ -36,12 +37,17 @@ final class APIClient {
         apiKey: String,
         wrapperSdk: String? = nil,
         baseURL: URL = URL(string: "https://qlqobn1oq5.execute-api.eu-west-2.amazonaws.com/prod/")!,
-        session: URLSession? = nil
+        session: URLSession? = nil,
+        videoUploader: VideoUploadClient? = nil
     ) {
         self.apiKey = apiKey
         self.wrapperSdk = wrapperSdk
         self.baseURL = baseURL
-        self.session = session ?? APIClient.makeDefaultSession()
+        let resolvedSession = session ?? APIClient.makeDefaultSession()
+        self.session = resolvedSession
+        var headers = ["Authorization": "Bearer \(apiKey)", "X-BugScreen-SDK": "ios/\(BugScreenSDK.version)"]
+        if let wrapperSdk { headers["X-BugScreen-SDK-Wrapper"] = wrapperSdk }
+        self.videoUploader = videoUploader ?? VideoUploadClient(baseURL: baseURL, headers: headers, session: resolvedSession)
     }
 
     /// Applies the headers every SDK→API request carries: Bearer auth and the OPS-011 SDK version
@@ -94,12 +100,16 @@ final class APIClient {
         screenshots: [PreparedScreenshot] = [],
         type: String? = nil,
         severity: String? = nil,
-        logFile: URL? = nil
+        logFile: URL? = nil,
+        videos: [PreparedVideo] = [],
+        visualOrder: [ReportMediaOrder] = []
     ) async throws -> BugReportResponse {
         // Validate description length
         guard !description.isEmpty, description.count <= 10000 else {
             throw BugScreenSDKError.invalidArgument("Description must be between 1 and 10000 characters")
         }
+
+        let visualAttachments = videos.isEmpty ? nil : try await videoUploader.references(videos: videos, order: visualOrder)
 
         // Construct url
         let url = baseURL.appendingPathComponent("reports")
@@ -133,7 +143,8 @@ final class APIClient {
                 screenshots: capped,
                 type: type,
                 severity: severity,
-                logFile: logFile
+                logFile: logFile,
+                visualAttachments: visualAttachments
             )
         }.value
         request.httpBody = body
@@ -169,6 +180,7 @@ final class APIClient {
         // Gson flow) and fall back to a status-code message only if the body
         // can't be decoded.
         if httpResponse.statusCode == 201 {
+            if !videos.isEmpty { await videoUploader.clearReadyUploads() }
             return try JSONDecoder().decode(BugReportResponse.self, from: data)
         }
         let parsed = try? JSONDecoder().decode(ErrorResponse.self, from: data)
@@ -194,10 +206,13 @@ final class APIClient {
             throw BugScreenSDKError.httpError(status: httpResponse.statusCode, code: nil, message: nil)
         }
         let config = try JSONDecoder().decode(SdkConfig.self, from: data)
+        if config.videoAttachmentLimits?.isValid == false { throw BugScreenSDKError.invalidResponse }
         return ResolvedSdkConfig(
             showBranding: config.showBranding,
             reportTypes: config.reportTypes ?? defaultReportTypes,
-            severityEnabled: config.severityEnabled ?? true
+            severityEnabled: config.severityEnabled ?? true,
+            videoAttachmentLimits: config.videoAttachmentLimits,
+            copy: config.reporterCopy ?? ReporterCopy()
         )
     }
 
@@ -215,9 +230,17 @@ final class APIClient {
         screenshots: [PreparedScreenshot],
         type: String?,
         severity: String?,
-        logFile: URL?
+        logFile: URL?,
+        visualAttachments: String? = nil
     ) throws -> Data {
         var body = Data()
+
+        if let visualAttachments {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"visualAttachments\"\r\n")
+            body.append("Content-Type: application/json\r\n\r\n")
+            body.append("\(visualAttachments)\r\n")
+        }
 
         // Add description (required field)
         body.append("--\(boundary)\r\n")

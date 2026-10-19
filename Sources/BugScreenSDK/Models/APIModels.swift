@@ -40,22 +40,47 @@ public struct BugReportPartialFailure: Codable, Sendable {
 ///
 /// `showBranding` is `true` on Free plans and `false` when the org's effective
 /// plan removes branding.
-struct SdkConfig: Codable {
+struct SdkConfig: Decodable {
     let appId: String
     let showBranding: Bool
     let reportTypes: [String]?
     let severityEnabled: Bool?
+    let videoAttachmentLimits: VideoAttachmentLimits?
+    let reporterCopy: ReporterCopy?
+
+    private enum CodingKeys: String,
+        CodingKey { case appId, showBranding, reportTypes, severityEnabled, videoAttachmentLimits, reporterCopy }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        appId = try c.decode(String.self, forKey: .appId)
+        showBranding = try c.decode(Bool.self, forKey: .showBranding)
+        reportTypes = try c.decodeIfPresent([String].self, forKey: .reportTypes)
+        severityEnabled = try c.decodeIfPresent(Bool.self, forKey: .severityEnabled)
+        videoAttachmentLimits = try c.decodeIfPresent(VideoAttachmentLimits.self, forKey: .videoAttachmentLimits)
+        reporterCopy = c.contains(.reporterCopy) ? try c.decode(ReporterCopy.self, forKey: .reporterCopy) : nil
+    }
 }
 
 struct ResolvedSdkConfig {
     let showBranding: Bool
     let reportTypes: [String]
     let severityEnabled: Bool
+    let videoAttachmentLimits: VideoAttachmentLimits?
+    let copy: ReporterCopy
 
-    init(showBranding: Bool, reportTypes: [String], severityEnabled: Bool = true) {
+    init(
+        showBranding: Bool,
+        reportTypes: [String],
+        severityEnabled: Bool = true,
+        videoAttachmentLimits: VideoAttachmentLimits? = nil,
+        copy: ReporterCopy = ReporterCopy()
+    ) {
         self.showBranding = showBranding
         self.reportTypes = reportTypes
         self.severityEnabled = severityEnabled
+        self.videoAttachmentLimits = videoAttachmentLimits
+        self.copy = copy
     }
 }
 

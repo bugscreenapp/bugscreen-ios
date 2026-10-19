@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
     /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
-    nonisolated static let version: String = "1.7.0"
+    nonisolated static let version: String = "1.8.0"
 
     // MARK: - Configuration
 
@@ -407,7 +407,7 @@ public enum BugScreenSDK {
             apiKey: String,
             baseURL: URL,
             session: URLSession,
-            runtimeConfigLoader: ((APIClient) async -> ResolvedSdkConfig)? = nil
+            runtimeConfigLoader: ((APIClient) async throws -> ResolvedSdkConfig)? = nil
         ) {
             runtimeConfigTask?.cancel()
             runtimeConfigTask = nil
@@ -457,7 +457,7 @@ public enum BugScreenSDK {
         }
     }
 
-    private static func loadReporterConfiguration(forceRefresh: Bool) async -> ReporterConfigurationResult {
+    static func loadReporterConfiguration(forceRefresh: Bool) async -> ReporterConfigurationResult {
         guard let client = apiClient else { return .unavailable }
         if forceRefresh || runtimeConfigTask == nil {
             loadRuntimeConfig(for: client, using: runtimeConfigLoader)
@@ -470,7 +470,9 @@ public enum BugScreenSDK {
             return .ready(ReporterConfiguration(
                 showBranding: config.showBranding,
                 reportTypes: config.reportTypes,
-                severityEnabled: config.severityEnabled
+                severityEnabled: config.severityEnabled,
+                videoAttachmentLimits: config.videoAttachmentLimits,
+                copy: config.copy
             ))
         case .failure:
             return .unavailable

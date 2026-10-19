@@ -2,6 +2,13 @@ import Combine
 import Foundation
 import UIKit
 
+struct PendingAttachment: Identifiable {
+    let id: UUID
+    var image: UIImage?
+    var video: PreparedVideo?
+    var isPreparing = true
+}
+
 /// ViewModel for the bug report UI.
 ///
 /// Manages form state, validation, and submission logic for the bug report screen.
@@ -14,13 +21,35 @@ final class BugReportViewModel: ObservableObject {
 
     /// Up to ``BugReportViewModel/maxScreenshots`` images to attach to the report.
     @Published private(set) var screenshots: [UIImage] = []
+    @Published private(set) var videos: [Int: PreparedVideo] = [:]
+    @Published private(set) var isPreparingMedia = false
+    @Published private(set) var pendingAttachments: [PendingAttachment] = []
+    private var preparationTask: Task<Void, Never>?
+    private var mediaClosed = false
+
+    func beginMediaImport(count: Int = 1) {
+        guard !mediaClosed else { return }
+        pendingAttachments = (0 ..< min(count, remainingScreenshotSlots)).map { _ in PendingAttachment(id: UUID()) }
+        isPreparingMedia = true
+    }
+
+    func finishMediaImport(_ picked: [PickedAttachment]) {
+        preparationTask = Task { await addPickedAttachments(picked) }
+    }
+
+    var supportsVideoAttachments: Bool {
+        submitter is VideoReportSubmitting && videoAttachmentLimits?.isValid == true
+    }
 
     /// Reporter-selected type display label. Nil when the Type section is hidden.
     @Published var bugType: String?
 
+    @Published private(set) var copy = ReporterCopy()
     @Published private(set) var reportTypes: [String] = []
 
     @Published private(set) var showBranding = false
+
+    @Published private(set) var videoAttachmentLimits: VideoAttachmentLimits?
 
     @Published private(set) var severityEnabled = true
 
@@ -77,6 +106,7 @@ final class BugReportViewModel: ObservableObject {
     private let submitter: BugReportSubmitting
     private let photosPermission: PhotosPermissionRequesting
     private let screenshotLocator: ScreenshotLocating
+    private let videoPreparer: VideoPreparing
     private let configurationLoader: @MainActor (Bool) async -> ReporterConfigurationResult
     private var configurationLoadStarted = false
 
@@ -95,8 +125,10 @@ final class BugReportViewModel: ObservableObject {
         submitter: BugReportSubmitting,
         photosPermission: PhotosPermissionRequesting = DefaultPhotosPermissionRequester(),
         screenshotLocator: ScreenshotLocating = DefaultScreenshotLocator(),
+        videoPreparer: VideoPreparing = DefaultVideoPreparer(),
         reportTypes: [String] = defaultReportTypes,
         severityEnabled: Bool = true,
+        videoAttachmentLimits: VideoAttachmentLimits? = nil,
         configurationLoader: (@MainActor (Bool) async -> ReporterConfigurationResult)? = nil
     ) {
         if let screenshot {
@@ -115,6 +147,7 @@ final class BugReportViewModel: ObservableObject {
         self.submitter = submitter
         self.photosPermission = photosPermission
         self.screenshotLocator = screenshotLocator
+        self.videoPreparer = videoPreparer
         if let configurationLoader {
             self.configurationLoader = configurationLoader
             bugType = nil
@@ -123,12 +156,14 @@ final class BugReportViewModel: ObservableObject {
                 .ready(ReporterConfiguration(
                     showBranding: false,
                     reportTypes: reportTypes,
-                    severityEnabled: severityEnabled
+                    severityEnabled: severityEnabled,
+                    videoAttachmentLimits: videoAttachmentLimits
                 ))
             }
             self.reportTypes = reportTypes
             bugType = reportTypes.first
             self.severityEnabled = severityEnabled
+            self.videoAttachmentLimits = videoAttachmentLimits
             configurationState = .ready
             configurationLoadStarted = true
         }
@@ -141,17 +176,21 @@ final class BugReportViewModel: ObservableObject {
     /// `descriptionValidationMessage` — silently disabling the button hides
     /// the reason from the user.
     var canSubmit: Bool {
-        submissionState != .submitting
+        submissionState != .submitting && !isPreparingMedia
+    }
+
+    var attachmentCount: Int {
+        screenshots.count + pendingAttachments.count
     }
 
     /// Whether there is room to attach more screenshots.
     var canAddMoreScreenshots: Bool {
-        screenshots.count < BugReportViewModel.maxScreenshots
+        attachmentCount < BugReportViewModel.maxScreenshots
     }
 
     /// Remaining attachment slots (0 to ``maxScreenshots``).
     var remainingScreenshotSlots: Int {
-        max(0, BugReportViewModel.maxScreenshots - screenshots.count)
+        max(0, BugReportViewModel.maxScreenshots - attachmentCount)
     }
 
     /// True when the user has unsaved input that would be lost on dismiss.
@@ -172,7 +211,7 @@ final class BugReportViewModel: ObservableObject {
     /// prompt. Blocks entirely mid-submit; otherwise allows dismiss only when the
     /// form has no unsaved input.
     var canDismissWithoutConfirmation: Bool {
-        if submissionState == .submitting { return false }
+        if submissionState == .submitting || isPreparingMedia { return false }
         if configurationState != .ready { return true }
         return !isDirty
     }
@@ -187,9 +226,121 @@ final class BugReportViewModel: ObservableObject {
         screenshots.append(contentsOf: images.prefix(slots))
     }
 
+    func addPickedAttachments(_ picked: [PickedAttachment]) async {
+        defer { picked.forEach { if case let .video(url) = $0 { try? FileManager.default.removeItem(at: url) } } }
+        guard !mediaClosed else { return }
+        isPreparingMedia = true
+        defer {
+            isPreparingMedia = false
+            clearPendingAttachments()
+        }
+        let batch = reserveAttachments(picked)
+
+        let videoSelections = batch.compactMap { id, item -> (UUID, URL)? in
+            guard case let .video(url) = item, supportsVideoAttachments else { return nil }
+            return (id, url)
+        }
+        await loadSourcePosters(videoSelections)
+        guard let limits = videoAttachmentLimits else { return }
+        for (id, url) in videoSelections {
+            guard !mediaClosed, !Task.isCancelled else { return }
+            do {
+                let video = try await videoPreparer.prepare(url, limits: limits)
+                guard !mediaClosed, !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: video.file)
+                    return
+                }
+                updatePending(id) { $0.image = video.poster; $0.video = video; $0.isPreparing = false }
+                flushReadyAttachments()
+            } catch {
+                guard !mediaClosed, !Task.isCancelled else { return }
+                failPending(id, error: error)
+                flushReadyAttachments()
+            }
+        }
+    }
+
+    private func reserveAttachments(_ picked: [PickedAttachment]) -> [(UUID, PickedAttachment)] {
+        let selected = Array(picked.prefix(Self.maxScreenshots - screenshots.count))
+        let existingIDs = pendingAttachments.map(\.id)
+        pendingAttachments = selected.indices.map { index in
+            PendingAttachment(id: index < existingIDs.count ? existingIDs[index] : UUID())
+        }
+        let batch = Array(zip(pendingAttachments.map(\.id), selected))
+        for (id, item) in batch {
+            switch item {
+            case let .image(image):
+                updatePending(id) { $0.image = image; $0.isPreparing = false }
+            case .video:
+                if !supportsVideoAttachments { removePending(id) }
+            case let .unavailable(failure):
+                failPending(id, error: failure)
+            }
+        }
+        flushReadyAttachments()
+
+        return batch
+    }
+
+    private func loadSourcePosters(_ videoSelections: [(UUID, URL)]) async {
+        let preparer = videoPreparer
+        await withTaskGroup(of: (UUID, UIImage?).self) { group in
+            for (id, url) in videoSelections {
+                group.addTask { @MainActor in (id, try? await preparer.poster(for: url)) }
+            }
+            for await (id, poster) in group {
+                guard !mediaClosed, !Task.isCancelled else { group.cancelAll(); continue }
+                updatePending(id) { $0.image = poster }
+            }
+        }
+    }
+
+    private func updatePending(_ id: UUID, update: (inout PendingAttachment) -> Void) {
+        guard let index = pendingAttachments.firstIndex(where: { $0.id == id }) else { return }
+        update(&pendingAttachments[index])
+    }
+
+    private func removePending(_ id: UUID) {
+        pendingAttachments.removeAll { $0.id == id }
+    }
+
+    private func failPending(_ id: UUID, error: Error = VideoPreparationError.importing) {
+        removePending(id)
+        lastError = .videoPreparation(error as? VideoPreparationError ?? .processing)
+        submissionState = .error
+    }
+
+    private func flushReadyAttachments() {
+        // Commit only the ready prefix so images after a video keep their selected position.
+        while let first = pendingAttachments.first, !first.isPreparing {
+            pendingAttachments.removeFirst()
+            guard let image = first.image else { continue }
+            if let video = first.video { videos[screenshots.count] = video }
+            screenshots.append(image)
+        }
+    }
+
+    private func clearPendingAttachments() {
+        pendingAttachments.compactMap(\.video).forEach { try? FileManager.default.removeItem(at: $0.file) }
+        pendingAttachments = []
+    }
+
+    func cleanupVideos() {
+        mediaClosed = true
+        isPreparingMedia = false
+        clearPendingAttachments()
+        preparationTask?.cancel()
+        preparationTask = nil
+        videos.values.forEach { try? FileManager.default.removeItem(at: $0.file) }
+        videos = [:]
+    }
+
     /// Removes the attachment at `index`, ignoring out-of-bounds indices.
     func removeScreenshot(at index: Int) {
         guard screenshots.indices.contains(index) else { return }
+        if let video = videos[index] { try? FileManager.default.removeItem(at: video.file) }
+        videos = Dictionary(uniqueKeysWithValues: videos.filter { $0.key != index }
+            .map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
         screenshots.remove(at: index)
         // Forget the placeholder if it was removed or its index shifted out
         // from under it. Either way the upgrade can no longer target a
@@ -208,7 +359,7 @@ final class BugReportViewModel: ObservableObject {
     /// matches the edited slot stops a late auto-attach upgrade from
     /// overwriting the user's markup; it also makes the form `isDirty`.
     func replaceScreenshot(at index: Int, with image: UIImage) {
-        guard screenshots.indices.contains(index) else { return }
+        guard videos[index] == nil, screenshots.indices.contains(index) else { return }
         screenshots[index] = image
         if placeholderIndex == index {
             placeholderIndex = nil
@@ -252,10 +403,12 @@ final class BugReportViewModel: ObservableObject {
         configurationState = .loading
         switch await configurationLoader(forceRefresh) {
         case let .ready(configuration):
+            copy = configuration.copy
             showBranding = configuration.showBranding
             reportTypes = configuration.reportTypes
             bugType = configuration.reportTypes.first
             severityEnabled = configuration.severityEnabled
+            videoAttachmentLimits = configuration.videoAttachmentLimits
             configurationState = .ready
         case .unavailable:
             configurationState = .error
@@ -266,6 +419,7 @@ final class BugReportViewModel: ObservableObject {
 
     /// Submits the bug report to the backend.
     func submit() async {
+        guard canSubmit else { return }
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             descriptionValidationMessage = SDKStrings.validationDescriptionRequired
@@ -291,17 +445,36 @@ final class BugReportViewModel: ObservableObject {
             // Off the main actor: preparing 4 retina screenshots can spend 1+ s of CPU
             // time, and this type is `@MainActor`, so doing it inline would freeze the
             // sheet mid-submit.
-            let toPrepare = screenshots
+            let toPrepare = screenshots.enumerated().filter { videos[$0.offset] == nil }.map(\.element)
             let prepared = await Task.detached(priority: .userInitiated) {
                 toPrepare.compactMap(ScreenshotPreparation.prepare)
             }.value
 
-            let response = try await submitter.submitBugReport(
-                description: trimmed,
-                screenshots: prepared,
-                type: bugType,
-                severity: severityEnabled ? severity.apiValue : nil
-            )
+            guard prepared.count == toPrepare.count else { throw BugScreenSDKError.encodingError }
+
+            let response: ReportReceipt
+            if !videos.isEmpty, let videoSubmitter = submitter as? VideoReportSubmitting {
+                var imageIndex = 0
+                var videoIndex = 0
+                let order = screenshots.indices.map { index -> ReportMediaOrder in
+                    let isVideo = videos[index] != nil
+                    defer {
+                        if isVideo {
+                            videoIndex += 1
+                        } else {
+                            imageIndex += 1
+                        }
+                    }
+                    return ReportMediaOrder(isVideo: isVideo, index: isVideo ? videoIndex : imageIndex)
+                }
+                response = try await videoSubmitter.submitVideoBugReport(description: trimmed, screenshots: prepared,
+                                                                         videos: videos.sorted { $0.key < $1.key }.map(\.value),
+                                                                         visualOrder: order,
+                                                                         type: bugType, severity: severityEnabled ? severity.apiValue : nil)
+            } else {
+                response = try await submitter.submitBugReport(description: trimmed, screenshots: prepared,
+                                                               type: bugType, severity: severityEnabled ? severity.apiValue : nil)
+            }
 
             partialFailures = response.partialFailures
             submissionState = .success
@@ -362,6 +535,8 @@ final class BugReportViewModel: ObservableObject {
 
     /// Resets the form after successful submission.
     func reset() {
+        cleanupVideos()
+        mediaClosed = false
         description = ""
         screenshots = []
         bugType = reportTypes.first

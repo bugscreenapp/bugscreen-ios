@@ -13,6 +13,8 @@ enum BugScreenSDKError: LocalizedError {
     case invalidArgument(String)
 
     /// The provided URL is invalid.
+    case videoPreparation(VideoPreparationError)
+
     case invalidURL
 
     /// The server response was invalid or could not be parsed.
@@ -43,19 +45,23 @@ enum BugScreenSDKError: LocalizedError {
     var userMessage: String {
         switch self {
         case .notConfigured, .invalidArgument, .invalidURL, .encodingError, .apiError:
-            SDKStrings.errorConfig
+            return SDKStrings.errorConfig
+        case let .videoPreparation(failure):
+            return failure.localizedDescription
         case .invalidResponse:
-            SDKStrings.errorServer
-        case let .httpError(status, code, _):
-            Self.userMessage(forStatus: status, code: code)
+            return SDKStrings.errorServer
+        case let .httpError(status, code, message):
+            if status == 400, code?.hasPrefix("validation.video_") == true,
+               let message, !message.isEmpty { return message }
+            return Self.userMessage(forStatus: status, code: code)
         case .cancelled:
-            SDKStrings.errorServer
+            return SDKStrings.errorServer
         case .offline:
-            SDKStrings.errorOffline
+            return SDKStrings.errorOffline
         case .timeout:
-            SDKStrings.errorTimeout
+            return SDKStrings.errorTimeout
         case .networkError:
-            SDKStrings.errorServer
+            return SDKStrings.errorServer
         }
     }
 
@@ -67,6 +73,8 @@ enum BugScreenSDKError: LocalizedError {
             return "BugScreenSDK not configured. Call BugScreenSDK.configure() before using the SDK."
         case let .invalidArgument(message):
             return "Invalid argument: \(message)"
+        case .videoPreparation:
+            return nil
         case .invalidURL:
             return "Invalid API URL."
         case .invalidResponse:
