@@ -295,10 +295,10 @@ final class APIClientTests: XCTestCase {
         }
     }
 
-    func test402PlanLimitReportsThrowsHTTPErrorWithConfigMessage() async {
-        let body = """
+    func test402PlanLimitReportsThrowsHTTPErrorWithConfigMessage() async throws {
+        let body = try XCTUnwrap("""
         {"error":"Payment Required","message":"over cap","statusCode":402,"code":"plan_limit.reports"}
-        """.data(using: .utf8)!
+        """.data(using: .utf8))
         stubStatus(402, body: body)
         await XCTAssertThrowsErrorAsync(
             try await makeClient().submitBugReport(description: "x", metadata: sampleMetadata())
@@ -555,7 +555,9 @@ final class APIClientTests: XCTestCase {
             }
         }
         XCTAssertEqual(calls, 1)
-        guard case let .ready(retry) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: true),
+        let duration = await BugScreenSDK.loadFloatingVideoDuration()
+        XCTAssertEqual(duration, 120)
+        guard case let .ready(retry) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false),
               case let .ready(reopened) = await BugScreenSDK.loadReporterConfiguration(forceRefresh: false)
         else { return XCTFail("Retry must recover the reporter configuration") }
         XCTAssertEqual(calls, 2)
@@ -697,8 +699,10 @@ final class APIClientTests: XCTestCase {
     private func extractPart(named name: String, from body: Data) -> Data? {
         guard let text = String(data: body, encoding: .utf8) else { return nil }
         let marker = "name=\"\(name)\""
-        guard let nameRange = text.range(of: marker) else { return nil }
-        guard let headerEnd = text.range(of: "\r\n\r\n", range: nameRange.upperBound ..< text.endIndex) else {
+        guard let nameRange = text.range(of: marker), let headerEnd = text.range(
+            of: "\r\n\r\n",
+            range: nameRange.upperBound ..< text.endIndex
+        ) else {
             return nil
         }
         let afterHeader = headerEnd.upperBound

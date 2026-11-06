@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'BugScreenSDK'
-  s.version          = '1.8.0'
+  s.version          = '1.9.0'
   s.summary          = 'Turn screenshots into bug reports in your issue tracker.'
   s.description      = <<-DESC
     BugScreen detects screenshots in your iOS app and lets users file a bug
@@ -41,6 +41,7 @@ Pod::Spec.new do |s|
   s.resource_bundles = {
     'BugScreenSDK' => [
       'Sources/BugScreenSDK/Resources/PrivacyInfo.xcprivacy',
+      'Sources/BugScreenSDK/Resources/ReportNotification.strings',
       'Sources/BugScreenSDK/Reporter/Resources/Localizable.xcstrings',
       'Sources/BugScreenSDK/Reporter/Resources/Media.xcassets'
     ]

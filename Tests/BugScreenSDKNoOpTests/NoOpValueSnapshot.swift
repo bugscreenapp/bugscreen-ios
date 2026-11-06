@@ -5,6 +5,14 @@ import Foundation
 /// primitives out, so NoOpValueParityTests can diff the two without importing
 /// either SDK module (both export the same type names).
 enum NoOpValueSnapshot {
+    static var recordingDurations: [Int] {
+        [-1, 30, 120].map { ScreenRecordingOptions(durationSeconds: $0).durationSeconds }
+    }
+
+    static var recordingQualities: [String] {
+        ScreenRecordingQuality.allCases.map(\.rawValue)
+    }
+
     static let logLevelDisplayNames: [Int: String] =
         Dictionary(uniqueKeysWithValues: LogLevel.allCases.map { ($0.rawValue, $0.displayName) })
     static let logLevelCaseCount = LogLevel.allCases.count

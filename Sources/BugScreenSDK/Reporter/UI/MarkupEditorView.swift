@@ -21,10 +21,7 @@ struct MarkupEditorView: View {
     @State private var pixelated: UIImage?
     @State private var isSaving = false
 
-    // In-progress drag, in image-pixel space (converted on the fly).
-    @State private var draftStart: CGPoint?
-    @State private var draftCurrent: CGPoint?
-    @State private var penPoints: [CGPoint] = []
+    @State private var draft: MarkupDraft?
 
     private var imageSize: CGSize {
         CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
@@ -123,23 +120,11 @@ struct MarkupEditorView: View {
         GeometryReader { geo in
             let fitted = fittedImageRect(imageSize: imageSize, boundsSize: geo.size)
             let dispScale = fitted.width > 0 ? fitted.width / imageSize.width : 0
-            ZStack {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-
-                Canvas { context, _ in
-                    for mark in marks {
-                        drawMark(mark, into: &context, fitted: fitted, dispScale: dispScale)
-                    }
-                    if let draft = draftMark(dispScale: dispScale) {
-                        drawMark(draft, into: &context, fitted: fitted, dispScale: dispScale)
-                    }
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .contentShape(Rectangle())
-            .gesture(dragGesture(fitted: fitted, dispScale: dispScale))
+            MarkupCanvas(image: image, pixelated: pixelated, marks: marks,
+                         draftMark: draft?.mark(preview: true), fitted: fitted)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .contentShape(Rectangle())
+                .gesture(dragGesture(fitted: fitted, dispScale: dispScale))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -148,33 +133,25 @@ struct MarkupEditorView: View {
     private func dragGesture(fitted: CGRect, dispScale: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                guard dispScale > 0 else { return }
+                guard dispScale > 0, !isSaving else { return }
                 let current = imagePoint(fromDisplay: value.location, fittedRect: fitted, imageSize: imageSize)
-                if draftStart == nil {
+                if draft == nil {
                     let start = imagePoint(fromDisplay: value.startLocation, fittedRect: fitted, imageSize: imageSize)
-                    draftStart = start
-                    penPoints = [start]
+                    draft = MarkupDraft(
+                        tool: tool,
+                        start: start,
+                        inkArgb: inkArgb,
+                        redactStyle: redactStyle,
+                        style: MarkStyle(displayScale: dispScale)
+                    )
                 }
-                draftCurrent = current
-                if tool == .pen {
-                    penPoints.append(current)
-                }
+                draft?.update(to: current)
             }
-            .onEnded { _ in
-                if let start = draftStart, let end = draftCurrent, dispScale > 0,
-                   let mark = markFromDrag(
-                       tool: tool,
-                       start: start,
-                       end: end,
-                       points: penPoints,
-                       inkArgb: inkArgb,
-                       redactStyle: redactStyle,
-                       style: markStyle(dispScale: dispScale)
-                   )
-                {
-                    marks.append(mark)
-                }
-                resetDraft()
+            .onEnded { value in
+                defer { draft = nil }
+                guard dispScale > 0, !isSaving else { return }
+                draft?.update(to: imagePoint(fromDisplay: value.location, fittedRect: fitted, imageSize: imageSize))
+                if let mark = draft?.mark() { marks.append(mark) }
             }
     }
 
@@ -267,6 +244,57 @@ struct MarkupEditorView: View {
         .accessibilityLabel(label)
     }
 
+    // MARK: - State helpers
+
+    private func undo() {
+        guard !marks.isEmpty else { return }
+        marks.removeLast()
+    }
+
+    private func save() {
+        guard !marks.isEmpty else {
+            onCancel()
+            return
+        }
+        isSaving = true
+        let source = image
+        let snapshot = marks
+        // Reuse the pixelated copy the `.task` already built for the live blur
+        // preview — same full-pixel source, so recomputing it would be wasted
+        // work. Fall back only if a save races the initial render.
+        let readyPixelated = pixelated
+        Task.detached {
+            let pixelated = readyPixelated ?? MarkupRenderer.pixelated(source)
+            let flattened = MarkupRenderer.flatten(image: source, marks: snapshot, pixelated: pixelated)
+            await MainActor.run { onSave(flattened) }
+        }
+    }
+}
+
+struct MarkupCanvas: View {
+    let image: UIImage
+    let pixelated: UIImage?
+    let marks: [MarkupMark]
+    let draftMark: MarkupMark?
+    let fitted: CGRect
+
+    private var imageSize: CGSize {
+        CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+    }
+
+    var body: some View {
+        let dispScale = imageSize.width > 0 ? fitted.width / imageSize.width : 0
+        Canvas { context, _ in
+            context.draw(Image(uiImage: image), in: fitted)
+            for mark in marks {
+                drawMark(mark, into: &context, fitted: fitted, dispScale: dispScale)
+            }
+            if let draftMark {
+                drawMark(draftMark, into: &context, fitted: fitted, dispScale: dispScale)
+            }
+        }
+    }
+
     // MARK: - Drawing
 
     private func drawMark(_ mark: MarkupMark, into context: inout GraphicsContext, fitted: CGRect, dispScale: CGFloat) {
@@ -305,17 +333,18 @@ struct MarkupEditorView: View {
                 path.addLine(to: displayPoint(fromImage: point, fittedRect: fitted, imageSize: imageSize))
             }
             context.stroke(path, with: .color(Color(argb: colorArgb)), style: strokeStyle(strokeWidthPx * dispScale))
-        case let .redact(rect, style):
-            let displayRect = displayRect(rect, fitted: fitted)
-            switch style {
-            case .solid:
-                context.fill(Path(displayRect), with: .color(Color(argb: redactSolidColor)))
-            case .blur:
-                guard let pixelated else { return }
-                var layer = context
-                layer.clip(to: Path(displayRect))
-                layer.draw(Image(uiImage: pixelated), in: fitted)
-            }
+        case let .blur(points, strokeWidthPx):
+            guard let pixelated else { return }
+            let coverage = Path(blurStrokePath(points: points, strokeWidthPx: strokeWidthPx))
+                .applying(CGAffineTransform(a: dispScale, b: 0, c: 0, d: dispScale, tx: fitted.minX, ty: fitted.minY))
+            var layer = context
+            let fillStyle = FillStyle(eoFill: false, antialiased: false)
+            layer.clip(to: Path(fitted), style: fillStyle)
+            layer.clip(to: coverage, style: fillStyle)
+            layer.blendMode = .copy
+            layer.draw(Image(uiImage: pixelated), in: fitted)
+        case let .solidRedact(rect):
+            context.fill(Path(displayRect(rect, fitted: fitted)), with: .color(Color(argb: redactSolidColor)))
         }
     }
 
@@ -336,60 +365,6 @@ struct MarkupEditorView: View {
 
     private func strokeStyle(_ width: CGFloat) -> StrokeStyle {
         StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
-    }
-
-    // MARK: - State helpers
-
-    private func markStyle(dispScale: CGFloat, minDragOverride: CGFloat? = nil) -> MarkStyle {
-        MarkStyle(
-            strokeWidthPx: markStrokeWidthPt / dispScale,
-            minDragPx: (minDragOverride ?? minDragPt) / dispScale,
-            cornerRadiusPx: boxCornerRadiusPt / dispScale,
-            arrowHeadLengthPx: arrowHeadLengthPt / dispScale
-        )
-    }
-
-    private func draftMark(dispScale: CGFloat) -> MarkupMark? {
-        guard let start = draftStart, let end = draftCurrent, dispScale > 0 else { return nil }
-        return markFromDrag(
-            tool: tool,
-            start: start,
-            end: end,
-            points: penPoints,
-            inkArgb: inkArgb,
-            redactStyle: redactStyle,
-            style: markStyle(dispScale: dispScale, minDragOverride: 0)
-        )
-    }
-
-    private func resetDraft() {
-        draftStart = nil
-        draftCurrent = nil
-        penPoints = []
-    }
-
-    private func undo() {
-        guard !marks.isEmpty else { return }
-        marks.removeLast()
-    }
-
-    private func save() {
-        guard !marks.isEmpty else {
-            onCancel()
-            return
-        }
-        isSaving = true
-        let source = image
-        let snapshot = marks
-        // Reuse the pixelated copy the `.task` already built for the live blur
-        // preview — same full-pixel source, so recomputing it would be wasted
-        // work. Fall back only if a save races the initial render.
-        let readyPixelated = pixelated
-        Task.detached {
-            let pixelated = readyPixelated ?? MarkupRenderer.pixelated(source)
-            let flattened = MarkupRenderer.flatten(image: source, marks: snapshot, pixelated: pixelated)
-            await MainActor.run { onSave(flattened) }
-        }
     }
 }
 

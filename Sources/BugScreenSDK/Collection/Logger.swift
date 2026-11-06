@@ -119,15 +119,14 @@ final class Logger: @unchecked Sendable {
 
         // Create temporary file
         let tempDir = FileManager.default.temporaryDirectory
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let filename = "bugscreen_logs_\(timestamp).txt"
+        let filename = "bugscreen_logs_\(UUID().uuidString).txt"
         let fileURL = tempDir.appendingPathComponent(filename)
 
         do {
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
             return fileURL
         } catch {
-            SDKLog.internalLog("Failed to export logs: \(error.localizedDescription)", type: .error)
+            SDKLog.internalLog("Failed to export custom logs", type: .error)
             return nil
         }
     }

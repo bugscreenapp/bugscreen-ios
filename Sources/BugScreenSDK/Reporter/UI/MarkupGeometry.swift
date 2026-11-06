@@ -26,7 +26,8 @@ enum MarkupMark: Equatable {
     case box(rect: CGRect, colorArgb: UInt32, strokeWidthPx: CGFloat, cornerRadiusPx: CGFloat)
     case arrow(start: CGPoint, end: CGPoint, colorArgb: UInt32, strokeWidthPx: CGFloat, headLengthPx: CGFloat)
     case pen(points: [CGPoint], colorArgb: UInt32, strokeWidthPx: CGFloat)
-    case redact(rect: CGRect, style: RedactStyle)
+    case blur(points: [CGPoint], strokeWidthPx: CGFloat)
+    case solidRedact(rect: CGRect)
 }
 
 /// Creation-time geometry for a new mark, all in image pixels. Bundled so the
@@ -34,9 +35,60 @@ enum MarkupMark: Equatable {
 /// Android SDK's `MarkStyle`.
 struct MarkStyle {
     let strokeWidthPx: CGFloat
-    let minDragPx: CGFloat
+    var minDragPx: CGFloat
     let cornerRadiusPx: CGFloat
     let arrowHeadLengthPx: CGFloat
+    let blurStrokeWidthPx: CGFloat
+
+    init(displayScale: CGFloat) {
+        strokeWidthPx = markStrokeWidthPt / displayScale
+        minDragPx = minDragPt / displayScale
+        cornerRadiusPx = boxCornerRadiusPt / displayScale
+        arrowHeadLengthPx = arrowHeadLengthPt / displayScale
+        blurStrokeWidthPx = blurStrokeWidthPt / displayScale
+    }
+}
+
+/// Captures the tool and image-space dimensions when a gesture begins, so a
+/// relayout cannot change the width of a stroke already in progress.
+struct MarkupDraft {
+    let tool: MarkupTool
+    let inkArgb: UInt32
+    let redactStyle: RedactStyle
+    let style: MarkStyle
+    private(set) var points: [CGPoint]
+
+    init(tool: MarkupTool, start: CGPoint, inkArgb: UInt32, redactStyle: RedactStyle, style: MarkStyle) {
+        self.tool = tool
+        self.inkArgb = inkArgb
+        self.redactStyle = redactStyle
+        self.style = style
+        points = [start]
+    }
+
+    mutating func update(to point: CGPoint) {
+        guard point != points.last else { return }
+        if tool == .pen || (tool == .redact && redactStyle == .blur) {
+            points.append(point)
+        } else {
+            points = [points[0], point]
+        }
+    }
+
+    func mark(preview: Bool = false) -> MarkupMark? {
+        guard let start = points.first, let end = points.last else { return nil }
+        var markStyle = style
+        if preview { markStyle.minDragPx = 0 }
+        return markFromDrag(
+            tool: tool,
+            start: start,
+            end: end,
+            points: points,
+            inkArgb: inkArgb,
+            redactStyle: redactStyle,
+            style: markStyle
+        )
+    }
 }
 
 // MARK: - Constants (mirrored with Android)
@@ -52,6 +104,7 @@ let redactSolidColor: UInt32 = 0xFF0F_0F0F
 let redactCellsLongEdge = 40
 
 let markStrokeWidthPt: CGFloat = 4
+let blurStrokeWidthPt: CGFloat = 32
 let arrowHeadLengthPt: CGFloat = 14
 let boxCornerRadiusPt: CGFloat = 6
 let minDragPt: CGFloat = 8
@@ -112,8 +165,8 @@ func normalizedRect(_ start: CGPoint, _ end: CGPoint) -> CGRect {
 
 /// Builds the mark a completed drag produces, or nil when the gesture was a
 /// tap / near-zero drag (the "tap creates no mark" acceptance criterion).
-/// Box/Arrow/Redact gate on start→end displacement; Pen gates on total path
-/// length so a tight scribble with small displacement still counts.
+/// Box/Arrow/Solid gate on start→end displacement; Pen and Blur gate on total
+/// path length so a tight scribble with small displacement still counts.
 func markFromDrag(
     tool: MarkupTool,
     start: CGPoint,
@@ -145,9 +198,36 @@ func markFromDrag(
             cornerRadiusPx: style.cornerRadiusPx
         )
     case .redact:
-        guard distance(start, end) >= style.minDragPx else { return nil }
-        return .redact(rect: normalizedRect(start, end), style: redactStyle)
+        return redactMarkFromDrag(start: start, end: end, points: points, redactStyle: redactStyle, style: style)
     }
+}
+
+private func redactMarkFromDrag(
+    start: CGPoint,
+    end: CGPoint,
+    points: [CGPoint],
+    redactStyle: RedactStyle,
+    style: MarkStyle
+) -> MarkupMark? {
+    switch redactStyle {
+    case .blur:
+        guard points.count >= 2, pathLength(points) >= style.minDragPx else { return nil }
+        return .blur(points: points, strokeWidthPx: style.blurStrokeWidthPx)
+    case .solid:
+        guard distance(start, end) >= style.minDragPx else { return nil }
+        return .solidRedact(rect: normalizedRect(start, end))
+    }
+}
+
+/// Preview and export clip the same continuous, rounded stroke outline.
+func blurStrokePath(points: [CGPoint], strokeWidthPx: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    guard points.count >= 2, strokeWidthPx > 0 else { return path }
+    path.move(to: points[0])
+    for point in points.dropFirst() {
+        path.addLine(to: point)
+    }
+    return path.copy(strokingWithWidth: strokeWidthPx, lineCap: .round, lineJoin: .round, miterLimit: 0)
 }
 
 /// Rescales a mark between two pixel spaces (the editor draws on a sampled
@@ -177,8 +257,13 @@ func scaledMark(_ mark: MarkupMark, sx: CGFloat, sy: CGFloat) -> MarkupMark {
             colorArgb: colorArgb,
             strokeWidthPx: strokeWidthPx * sx
         )
-    case let .redact(rect, style):
-        .redact(rect: scaledRect(rect, sx: sx, sy: sy), style: style)
+    case let .blur(points, strokeWidthPx):
+        .blur(
+            points: points.map { CGPoint(x: $0.x * sx, y: $0.y * sy) },
+            strokeWidthPx: strokeWidthPx * sx
+        )
+    case let .solidRedact(rect):
+        .solidRedact(rect: scaledRect(rect, sx: sx, sy: sy))
     }
 }
 

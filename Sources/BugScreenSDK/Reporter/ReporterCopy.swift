@@ -36,9 +36,10 @@ struct ReporterCopy: Decodable {
             guard container.contains(key) else { return fallback }
             let supplied = try container.decode(String.self, forKey: key)
             let normalized = supplied.precomposedStringWithCanonicalMapping.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalized.isEmpty, normalized.unicodeScalars.count <= limit,
-                  !supplied.unicodeScalars
-                  .contains(where: { $0.properties.generalCategory == .control || $0.properties.generalCategory == .format })
+            let containsControlCharacters = supplied.unicodeScalars.contains {
+                $0.properties.generalCategory == .control || $0.properties.generalCategory == .format
+            }
+            guard !normalized.isEmpty, normalized.unicodeScalars.count <= limit, !containsControlCharacters
             else { throw DecodingError.dataCorruptedError(forKey: key, in: container, debugDescription: "Invalid reporter wording") }
             return normalized
         }

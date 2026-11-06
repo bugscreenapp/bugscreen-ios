@@ -672,6 +672,303 @@
           }
         }
       }
+    },
+    "recording.failure.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No recent video is available yet. Continue using the app after enabling recording, then report again."
+          }
+        }
+      }
+    },
+    "recording.failure.permissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video was not attached because recording permission was not granted."
+          }
+        }
+      }
+    },
+    "recording.failure.stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video was not attached because screen recording was stopped."
+          }
+        }
+      }
+    },
+    "recording.failure.interrupted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video could not be attached because recording was interrupted."
+          }
+        }
+      }
+    },
+    "recording.failure.recorderBusy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video is unavailable while another screen recording is active."
+          }
+        }
+      }
+    },
+    "recording.failure.captureUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screen recording is unavailable on this device or with its current screen-sharing settings."
+          }
+        }
+      }
+    },
+    "recording.failure.hardwareEncoderUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video is unavailable because a hardware video encoder could not be verified."
+          }
+        }
+      }
+    },
+    "recording.failure.unsupportedProfile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video is unavailable because this device cannot encode the selected recording quality."
+          }
+        }
+      }
+    },
+    "recording.failure.encodingFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video could not be encoded. You can still submit this report."
+          }
+        }
+      }
+    },
+    "recording.failure.memoryPressure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video recording stopped because the device was low on memory."
+          }
+        }
+      }
+    },
+    "recording.failure.thermalPressure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video recording stopped because the device became too warm."
+          }
+        }
+      }
+    },
+    "recording.failure.noSlot": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent video was not attached because this report already has four attachments. You can still submit this report."
+          }
+        }
+      }
+    },
+    "floating.Hide": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide"
+          }
+        }
+      }
+    },
+    "floating.Left": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to left edge"
+          }
+        }
+      }
+    },
+    "floating.Right": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to right edge"
+          }
+        }
+      }
+    },
+    "floating.Report": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make a bug report"
+          }
+        }
+      }
+    },
+    "floating.Record": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start screen recording"
+          }
+        }
+      }
+    },
+    "floating.Preparing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing recording"
+          }
+        }
+      }
+    },
+    "floating.Open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open bug report actions"
+          }
+        }
+      }
+    },
+    "floating.Close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close bug report actions"
+          }
+        }
+      }
+    },
+    "floating.ScreenshotFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot unavailable. You can still send this report or add an image."
+          }
+        }
+      }
+    },
+    "floating.PolicyFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording settings are unavailable. Try again when you are connected."
+          }
+        }
+      }
+    },
+    "floating.RecordingFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording unavailable. Check screen recording permission and try again."
+          }
+        }
+      }
+    },
+    "floating.Interrupted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording stopped. Any available video will be attached."
+          }
+        }
+      }
+    },
+    "floating.Busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording is busy. Try again after the current recording finishes."
+          }
+        }
+      }
+    },
+    "floating.LimitReached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording reached its duration limit. Any available video will be attached."
+          }
+        }
+      }
+    },
+    "floating.stop_elapsed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop recording, %@"
+          }
+        }
+      }
     }
   }
 }

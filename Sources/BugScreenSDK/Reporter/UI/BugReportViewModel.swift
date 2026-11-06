@@ -26,6 +26,11 @@ final class BugReportViewModel: ObservableObject {
     @Published private(set) var pendingAttachments: [PendingAttachment] = []
     private var preparationTask: Task<Void, Never>?
     private var mediaClosed = false
+    var initialMediaLoader: (@MainActor () async -> [PickedAttachment])?
+    var initialMediaCount = 0
+    var automaticVideo: AutomaticVideoSource?
+    private var automaticVideoIndex: Int?
+    private var automaticVideoStarted = false
 
     func beginMediaImport(count: Int = 1) {
         guard !mediaClosed else { return }
@@ -201,10 +206,8 @@ final class BugReportViewModel: ObservableObject {
         if !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return true
         }
-        if placeholderIndex != nil {
-            return screenshots.count > 1
-        }
-        return !screenshots.isEmpty
+        let untouched = Set([placeholderIndex, automaticVideoIndex].compactMap { $0 })
+        return screenshots.indices.contains { !untouched.contains($0) }
     }
 
     /// Whether a swipe / scrim-tap dismiss should be honored without a discard
@@ -272,7 +275,7 @@ final class BugReportViewModel: ObservableObject {
             case let .image(image):
                 updatePending(id) { $0.image = image; $0.isPreparing = false }
             case .video:
-                if !supportsVideoAttachments { removePending(id) }
+                if !supportsVideoAttachments { failPending(id, error: VideoPreparationError.configuration) }
             case let .unavailable(failure):
                 failPending(id, error: failure)
             }
@@ -327,6 +330,8 @@ final class BugReportViewModel: ObservableObject {
 
     func cleanupVideos() {
         mediaClosed = true
+        automaticVideo?.cancel()
+        automaticVideo = nil
         isPreparingMedia = false
         clearPendingAttachments()
         preparationTask?.cancel()
@@ -342,6 +347,9 @@ final class BugReportViewModel: ObservableObject {
         videos = Dictionary(uniqueKeysWithValues: videos.filter { $0.key != index }
             .map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
         screenshots.remove(at: index)
+        if let automatic = automaticVideoIndex {
+            automaticVideoIndex = automatic == index ? nil : (automatic > index ? automatic - 1 : automatic)
+        }
         // Forget the placeholder if it was removed or its index shifted out
         // from under it. Either way the upgrade can no longer target a
         // specific slot, so the OS screenshot (if it arrives) will append.
@@ -410,10 +418,54 @@ final class BugReportViewModel: ObservableObject {
             severityEnabled = configuration.severityEnabled
             videoAttachmentLimits = configuration.videoAttachmentLimits
             configurationState = .ready
+            if let source = automaticVideo, !automaticVideoStarted {
+                automaticVideoStarted = true
+                if screenshots.count < Self.maxScreenshots {
+                    beginMediaImport()
+                    preparationTask = Task { await importAutomaticVideo() }
+                } else {
+                    source.cancel()
+                    automaticVideo = nil
+                    lastError = .videoPreparation(.recording("noSlot"))
+                    submissionState = .error
+                }
+            }
+            if let loader = initialMediaLoader {
+                initialMediaLoader = nil
+                beginMediaImport(count: initialMediaCount)
+                let picked = await loader()
+                await addPickedAttachments(picked)
+            }
         case .unavailable:
             configurationState = .error
         case .notReady, .credentialRejected:
             onDismiss()
+        }
+    }
+
+    private func importAutomaticVideo() async {
+        guard let source = automaticVideo, !mediaClosed else { return }
+        defer {
+            isPreparingMedia = false
+            clearPendingAttachments()
+            source.cancel()
+            automaticVideo = nil
+        }
+        do {
+            guard supportsVideoAttachments else { throw VideoPreparationError.configuration }
+            let prepared = try await source.load(videoAttachmentLimits)
+            guard !mediaClosed, !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: prepared.file)
+                return
+            }
+            clearPendingAttachments()
+            automaticVideoIndex = screenshots.count
+            videos[screenshots.count] = prepared
+            screenshots.append(prepared.poster)
+        } catch {
+            guard !mediaClosed else { return }
+            lastError = .videoPreparation(error as? VideoPreparationError ?? .recording("interrupted"))
+            submissionState = .error
         }
     }
 

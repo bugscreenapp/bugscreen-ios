@@ -19,10 +19,56 @@ public enum BugScreenSDK {
         false
     }
 
+    public static func setShakeDetectionEnabled(_: Bool) {}
+
+    public static func showReportNotification(requestPermission _: Bool = true) {}
+    public static func hideReportNotification() {}
+
+    public static func showFloatingButton() {}
+    public static func hideFloatingButton() {}
+
+    public static func configure(
+        apiKey _: String,
+        enableScreenshotDetection _: Bool = true,
+        showFloatingButton _: Bool,
+        startScreenRecordingImmediately _: Bool = false,
+        screenRecordingOptions _: ScreenRecordingOptions = .init(),
+        debug _: Bool = false,
+        captureSystemLogs _: Bool = false
+    ) {}
+
     public static func configure(
         apiKey _: String,
         enableScreenshotDetection _: Bool = true,
         debug _: Bool = false
+    ) {}
+
+    public static func configure(
+        apiKey _: String,
+        enableScreenshotDetection _: Bool = true,
+        debug _: Bool = false,
+        captureSystemLogs _: Bool
+    ) {}
+
+    public static var screenRecordingState: ScreenRecordingState {
+        .disabled
+    }
+
+    public static func startScreenRecording() {}
+
+    public static func stopScreenRecording() {}
+
+    public static func configure(
+        apiKey _: String,
+        enableScreenshotDetection _: Bool = true,
+        enableShakeDetection _: Bool = false,
+        debug _: Bool = false,
+        captureSystemLogs _: Bool = false,
+        showReportNotification _: Bool = false,
+        requestNotificationPermission _: Bool = true,
+        startScreenRecordingImmediately _: Bool = false,
+        screenRecordingOptions _: ScreenRecordingOptions = .init(),
+        showFloatingButton _: Bool = false
     ) {}
 
     public static func log(_: String, level _: LogLevel = .info) {}

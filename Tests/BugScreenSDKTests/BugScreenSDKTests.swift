@@ -56,6 +56,16 @@ final class BugScreenSDKTests: XCTestCase {
         XCTAssertEqual(BugScreenSDK.configuration?.apiKey, "fb_different_key_1234567890")
     }
 
+    func testConfigureSystemLogsAndRecordingOptionsTogether() {
+        let options = ScreenRecordingOptions(durationSeconds: 45, quality: .low)
+        BugScreenSDK.configure(apiKey: "", enableScreenshotDetection: false,
+                               captureSystemLogs: true, screenRecordingOptions: options)
+
+        XCTAssertEqual(BugScreenSDK.configuration?.captureSystemLogs, true)
+        XCTAssertEqual(BugScreenSDK.configuration?.screenRecordingOptions, options)
+        XCTAssertEqual(BugScreenSDK.screenRecordingState, .disabled)
+    }
+
     func testConfigureWithCustomOptions() {
         BugScreenSDK.configure(
             apiKey: TestHelpers.validAPIKey,
@@ -64,6 +74,21 @@ final class BugScreenSDKTests: XCTestCase {
         )
 
         XCTAssertTrue(BugScreenSDK.isConfigured, "SDK should be configured with custom options")
+    }
+
+    func testSystemLogsDefaultOffAndReconfigurationInvalidatesSnapshots() throws {
+        BugScreenSDK.configure(apiKey: TestHelpers.validAPIKey)
+        XCTAssertFalse(try XCTUnwrap(BugScreenSDK.configuration).captureSystemLogs)
+        BugScreenSDK.configure(apiKey: TestHelpers.validAPIKey, captureSystemLogs: true)
+        let enabled = try XCTUnwrap(BugScreenSDK.configuration)
+        XCTAssertTrue(enabled.captureSystemLogs)
+        XCTAssertTrue(enabled.systemLogLifetime.isActive)
+        BugScreenSDK.configure(apiKey: TestHelpers.validAPIKey)
+        XCTAssertFalse(enabled.systemLogLifetime.isActive)
+        XCTAssertFalse(try XCTUnwrap(BugScreenSDK.configuration).captureSystemLogs)
+        let latest = try XCTUnwrap(BugScreenSDK.configuration).systemLogLifetime
+        BugScreenSDK.shutdown()
+        XCTAssertFalse(latest.isActive)
     }
 
     // MARK: - Logging Tests

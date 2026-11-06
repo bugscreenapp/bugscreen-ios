@@ -4,6 +4,70 @@ import Foundation
 /// `Resources/Localizable.xcstrings`. Keeps lookups out of UI sites and
 /// gives a single place to add new copy.
 enum SDKStrings {
+    static var floatingHide: String {
+        localized("floating.Hide")
+    }
+
+    static var floatingLeft: String {
+        localized("floating.Left")
+    }
+
+    static var floatingRight: String {
+        localized("floating.Right")
+    }
+
+    static var floatingReport: String {
+        localized("floating.Report")
+    }
+
+    static var floatingRecord: String {
+        localized("floating.Record")
+    }
+
+    static var floatingPreparing: String {
+        localized("floating.Preparing")
+    }
+
+    static var floatingOpen: String {
+        localized("floating.Open")
+    }
+
+    static var floatingClose: String {
+        localized("floating.Close")
+    }
+
+    static var floatingScreenshotFailed: String {
+        localized("floating.ScreenshotFailed")
+    }
+
+    static var floatingPolicyFailed: String {
+        localized("floating.PolicyFailed")
+    }
+
+    static var floatingRecordingFailed: String {
+        localized("floating.RecordingFailed")
+    }
+
+    static var floatingInterrupted: String {
+        localized("floating.Interrupted")
+    }
+
+    static var floatingBusy: String {
+        localized("floating.Busy")
+    }
+
+    static var floatingLimitReached: String {
+        localized("floating.LimitReached")
+    }
+
+    static func floatingStopElapsed(_ elapsed: String) -> String {
+        String(format: localized("floating.stop_elapsed"), elapsed)
+    }
+
+    static func recordingFailure(_ reason: String) -> String {
+        localized("recording.failure.\(reason)")
+    }
+
     static var errorTitle: String {
         localized("error.title")
     }

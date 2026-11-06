@@ -78,6 +78,44 @@ enum VideoPreparation {
         }
     }
 
+    /// Internal generated-media path: validate the finished H.264 file without changing capture quality.
+    static func adoptGenerated(_ source: URL, limits: VideoAttachmentLimits, retaining ownership: AnyObject? = nil,
+                               check: @escaping () throws -> Void) async throws -> PreparedVideo
+    {
+        try check()
+        guard limits.isValid else { throw VideoPreparationError.configuration }
+        _ = try await sourceAsset(source, limits: limits)
+        let duration = try await validatePrepared(source, limits: limits)
+        let asset = AVURLAsset(url: source)
+        guard try await asset.loadTracks(withMediaType: .audio).isEmpty else { throw VideoPreparationError.encoding }
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: tracks[0], outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        ])
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else { throw VideoPreparationError.decoding }
+        reader.add(output)
+        guard reader.startReading() else { throw VideoPreparationError.decoding }
+        let deadline = Date().addingTimeInterval(30)
+        var decoded = 0
+        do {
+            while true {
+                try check()
+                try Task.checkCancellation()
+                guard Date() < deadline else { throw VideoPreparationError.processing }
+                let found = autoreleasepool { output.copyNextSampleBuffer() != nil }
+                if !found { break }
+                decoded += 1
+            }
+            guard decoded > 0, reader.status == .completed else { throw VideoPreparationError.decoding }
+        } catch { reader.cancelReading(); throw error }
+        try check()
+        let poster = try await GeneratedVideoPoster(source: source, retaining: ownership).image(check: check)
+        try check()
+        return PreparedVideo(file: source, poster: poster, durationSeconds: duration)
+    }
+
     private static func sourceAsset(_ source: URL, limits: VideoAttachmentLimits) async throws -> AVURLAsset {
         do {
             let size = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -125,5 +163,59 @@ enum VideoPreparation {
         if duration > limits.maxDurationSeconds {
             throw VideoPreparationError.tooLong(actual: duration, limit: limits.maxDurationSeconds)
         }
+    }
+}
+
+/// Only generated clips use this cancellation/deadline wrapper; imported media keeps its existing path.
+private final class GeneratedVideoPoster: @unchecked Sendable {
+    private let generator: AVAssetImageGenerator
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<UIImage, Error>?
+    private var timer: DispatchSourceTimer?
+
+    private var ownership: AnyObject?
+
+    init(source: URL, retaining ownership: AnyObject?) {
+        self.ownership = ownership
+        generator = AVAssetImageGenerator(asset: AVURLAsset(url: source))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 224, height: 224)
+    }
+
+    func image(check: @escaping () throws -> Void) async throws -> UIImage {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let deadline = Date().addingTimeInterval(15)
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            self.timer = timer
+            timer.schedule(deadline: .now() + 0.1, repeating: 0.1)
+            timer.setEventHandler { [weak self] in
+                do {
+                    try check()
+                    guard Date() < deadline else { throw VideoPreparationError.preview }
+                } catch {
+                    self?.generator.cancelAllCGImageGeneration()
+                    self?.finish(.failure(error))
+                }
+            }
+            timer.resume()
+            generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: .zero)]) { [self] _, image, _, result, _ in
+                if result == .succeeded, let image {
+                    finish(.success(UIImage(cgImage: image)))
+                } else { finish(.failure(VideoPreparationError.preview)) }
+                lock.lock()
+                ownership = nil
+                lock.unlock()
+            }
+        }
+    }
+
+    private func finish(_ result: Result<UIImage, Error>) {
+        lock.lock()
+        let value = continuation
+        continuation = nil
+        lock.unlock()
+        timer?.cancel()
+        value?.resume(with: result)
     }
 }

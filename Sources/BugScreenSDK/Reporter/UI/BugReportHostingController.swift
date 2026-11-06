@@ -26,8 +26,8 @@ final class BugReportHostingController: UIViewController,
     private let content: UIHostingController<BugReportView>
 
     /// Invoked exactly once when the reporter is finally dismissed — filed, discarded, or swiped
-    /// away. The SDK does not care about the outcome and passes `nil`; the companion app uses it to
-    /// decide whether a credential rejection seen at submit drops the device to unpaired (RFC-003
+    /// away. The SDK uses it to resume local capture; the companion app uses it to decide
+    /// whether a credential rejection seen at submit drops the device to unpaired (RFC-003
     /// §2.5). It carries no result: whether a report was filed or the credential was rejected is the
     /// host's own to track (the companion reads it off its submitter).
     private let onFinished: (() -> Void)?
@@ -43,12 +43,15 @@ final class BugReportHostingController: UIViewController,
     ///     window-snapshot fallback, which auto-attach may later upgrade. The companion app passes
     ///     everything the tester shared, so the array rather than a single image; anything beyond
     ///     `BugReportViewModel.maxScreenshots` is dropped there.
-    ///   - onFinished: called once on final dismissal. `nil` for the SDK.
+    ///   - onFinished: called once on final dismissal to release host presentation state.
     init(
         host: ReporterHost,
         screenshots: [UIImage] = [],
         autoAttach: Bool = false,
         initialDescription: String = "",
+        initialMediaCount: Int = 0,
+        initialMediaLoader: (@MainActor () async -> [PickedAttachment])? = nil,
+        automaticVideo: AutomaticVideoSource? = nil,
         onFinished: (() -> Void)? = nil,
         dismissReport: ((@escaping () -> Void) -> Void)? = nil,
         presentSuccess: @escaping @MainActor (UIWindowScene?, [ReportPartialFailure], ReporterCopy) -> Void = { scene, partials, copy in
@@ -78,6 +81,9 @@ final class BugReportHostingController: UIViewController,
             configurationLoader: host.configurationLoader
         )
         vm.addScreenshots(Array(screenshots.dropFirst()))
+        vm.automaticVideo = automaticVideo
+        vm.initialMediaLoader = initialMediaLoader
+        vm.initialMediaCount = initialMediaCount
         vm.description = initialDescription
         viewModel = vm
         content = UIHostingController(rootView: BugReportView(viewModel: vm))
@@ -131,6 +137,12 @@ final class BugReportHostingController: UIViewController,
         content.didMove(toParent: self)
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Hosts can dismiss their entire presentation stack without calling our close action.
+        if isBeingDismissed || presentingViewController == nil { finishOnce() }
+    }
+
     private func performDismissal(_ completion: @escaping () -> Void) {
         if let dismissReport {
             dismissReport(completion)
@@ -170,8 +182,7 @@ final class BugReportHostingController: UIViewController,
     }
 
     func presentationControllerDidAttemptToDismiss(_: UIPresentationController) {
-        guard viewModel.submissionState != .submitting, !viewModel.isPreparingMedia else { return }
-        guard viewModel.configurationState == .ready else { return }
+        guard viewModel.submissionState != .submitting, !viewModel.isPreparingMedia, viewModel.configurationState == .ready else { return }
         presentDiscardConfirmation()
     }
 

@@ -23,6 +23,10 @@ final class APIClient {
     private let session: URLSession
     private let videoUploader: VideoUploadClient
 
+    #if DEBUG
+        var multipartBodyPreparedForTesting: (() async -> Void)?
+    #endif
+
     // MARK: - Initialization
 
     /// Creates a new API client.
@@ -102,7 +106,8 @@ final class APIClient {
         severity: String? = nil,
         logFile: URL? = nil,
         videos: [PreparedVideo] = [],
-        visualOrder: [ReportMediaOrder] = []
+        visualOrder: [ReportMediaOrder] = [],
+        systemLogs: SystemLogSnapshot? = nil
     ) async throws -> BugReportResponse {
         // Validate description length
         guard !description.isEmpty, description.count <= 10000 else {
@@ -110,6 +115,7 @@ final class APIClient {
         }
 
         let visualAttachments = videos.isEmpty ? nil : try await videoUploader.references(videos: videos, order: visualOrder)
+        try Task.checkCancellation()
 
         // Construct url
         let url = baseURL.appendingPathComponent("reports")
@@ -135,7 +141,7 @@ final class APIClient {
         // appends. The caller is `@MainActor`, so build the body off it. The
         // expensive part — downscale + JPEG encode — happens in the reporter
         // before it ever reaches here (RFC-003 §2.2).
-        let body = try await Task.detached(priority: .userInitiated) {
+        let encodeBody: @Sendable (SystemLogSnapshot?) throws -> Data = { logs in
             try APIClient.createMultipartBody(
                 boundary: boundary,
                 description: description,
@@ -144,9 +150,19 @@ final class APIClient {
                 type: type,
                 severity: severity,
                 logFile: logFile,
-                visualAttachments: visualAttachments
+                visualAttachments: visualAttachments,
+                systemLogs: logs
             )
-        }.value
+        }
+        var body = try await Task.detached(priority: .userInitiated) { try encodeBody(systemLogs) }.value
+        #if DEBUG
+            await multipartBodyPreparedForTesting?()
+        #endif
+        try Task.checkCancellation()
+        if systemLogs?.lifetime.isActive == false {
+            body = try await Task.detached(priority: .userInitiated) { try encodeBody(nil) }.value
+        }
+        try Task.checkCancellation()
         request.httpBody = body
 
         // Perform request. Map well-known URLError codes to typed SDK cases so
@@ -231,7 +247,8 @@ final class APIClient {
         type: String?,
         severity: String?,
         logFile: URL?,
-        visualAttachments: String? = nil
+        visualAttachments: String? = nil,
+        systemLogs: SystemLogSnapshot? = nil
     ) throws -> Data {
         var body = Data()
 
@@ -307,8 +324,19 @@ final class APIClient {
             body.append("\r\n")
         }
 
-        // Add closing boundary
-        body.append("--\(boundary)--\r\n")
+        let closing = Data("--\(boundary)--\r\n".utf8)
+        if let systemLogs, systemLogs.lifetime.isActive {
+            let framing = Data(("--\(boundary)\r\n"
+                    + "Content-Disposition: form-data; name=\"systemLogFile\"; filename=\"system-logs.txt\"\r\n"
+                    + "Content-Type: text/plain\r\n\r\n").utf8)
+            let available = Self.systemLogBodyBudget - body.count - closing.count - framing.count - 2
+            if let payload = systemLogs.payload(maximumBytes: available), systemLogs.lifetime.isActive {
+                body.append(framing)
+                body.append(payload)
+                body.append("\r\n")
+            }
+        }
+        body.append(closing)
 
         return body
     }
@@ -316,4 +344,5 @@ final class APIClient {
     /// Maximum number of screenshots accepted per report. Matches the backend's
     /// busboy file-count limit and the Android SDK's `MAX_SCREENSHOTS`.
     static let maxScreenshots = 4
+    static let systemLogBodyBudget = 4_194_304
 }

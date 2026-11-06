@@ -164,3 +164,15 @@ struct DefaultScreenshotLocator: ScreenshotLocating {
         ScreenshotLocator.findLatestScreenshot(since: since, completion: completion)
     }
 }
+
+/// Optional host-owned recent evidence. The reporter never imports a platform capture implementation.
+@MainActor
+final class AutomaticVideoSource {
+    let load: (VideoAttachmentLimits?) async throws -> PreparedVideo
+    let cancel: () -> Void
+
+    init(load: @escaping (VideoAttachmentLimits?) async throws -> PreparedVideo, cancel: @escaping () -> Void = {}) {
+        self.load = load
+        self.cancel = cancel
+    }
+}

@@ -12,6 +12,11 @@ import XCTest
 /// modules via primitive snapshots (RealSDKValueSnapshot / NoOpValueSnapshot),
 /// which each import one module in isolation so this file needs neither.
 final class NoOpValueParityTests: XCTestCase {
+    func testRecordingOptionsAndQualityMatchRealSDK() {
+        XCTAssertEqual(RealSDKValueSnapshot.recordingDurations, NoOpValueSnapshot.recordingDurations)
+        XCTAssertEqual(RealSDKValueSnapshot.recordingQualities, NoOpValueSnapshot.recordingQualities)
+    }
+
     func testLogLevelDisplayNamesAndOrderingMatchRealSDK() {
         XCTAssertEqual(RealSDKValueSnapshot.logLevelDisplayNames, NoOpValueSnapshot.logLevelDisplayNames)
         XCTAssertEqual(RealSDKValueSnapshot.logLevelCaseCount, NoOpValueSnapshot.logLevelCaseCount)

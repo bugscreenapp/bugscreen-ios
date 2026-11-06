@@ -24,7 +24,7 @@ import UIKit
 public enum BugScreenSDK {
     /// The version of the BugScreen SDK. Updated by the release process. `nonisolated` so the
     /// non-isolated `APIClient` can read it for the `X-BugScreen-SDK` header (OPS-011).
-    nonisolated static let version: String = "1.8.0"
+    nonisolated static let version: String = "1.9.0"
 
     // MARK: - Configuration
 
@@ -36,6 +36,129 @@ public enum BugScreenSDK {
 
     /// Returns the internal API client (used by the bug report UI submit adapter).
     private(set) static var apiClient: APIClient?
+
+    private static var shakeDetector: ShakeDetector?
+    #if DEBUG
+        static var makeShakeMotionSource: () -> ShakeMotionSource = { AccelerometerSource() }
+    #else
+        private static func makeShakeMotionSource() -> ShakeMotionSource {
+            AccelerometerSource()
+        }
+    #endif
+    private static var reportNotificationController: ReportNotificationController?
+    private static var recordingController: ScreenRecordingController?
+    private static var floatingControl: FloatingControlCoordinator?
+    private static var reportNotificationCleanup: Task<Void, Never>?
+    static var makeReportNotificationCenter: () -> ReportNotificationCenter = { SystemReportNotificationCenter() }
+    private weak static var activeReporter: BugReportHostingController?
+
+    /// Current recording availability. Recording is off unless explicitly enabled.
+    public static var screenRecordingState: ScreenRecordingState {
+        recordingController?.state ?? .disabled
+    }
+
+    /// Starts or retries recording after system consent. Before configure this does nothing.
+    public static func startScreenRecording() {
+        setScreenRecordingEnabled(true)
+    }
+
+    /// Stops recording and clears recent history. Before configure this does nothing.
+    public static func stopScreenRecording() {
+        setScreenRecordingEnabled(false)
+    }
+
+    private static func setScreenRecordingEnabled(_ enabled: Bool) {
+        guard isConfigured else { return }
+        if recordingController == nil, enabled {
+            recordingController = ScreenRecordingController(options: configuration?.screenRecordingOptions ?? .init())
+            if activeReporter != nil { _ = recordingController?.reportWillOpen() }
+        }
+        recordingController?.setEnabled(enabled)
+    }
+
+    /// Enables or disables foreground shake reporting for this session. No-op before configure.
+    /// Disabling keeps an open report and its attachments intact. Requires NSMotionUsageDescription.
+    /// Reconfiguration restores the new initial setting.
+    public static func setShakeDetectionEnabled(_ enabled: Bool) {
+        guard isConfigured else { return }
+        configuration?.enableShakeDetection = enabled
+        if !enabled {
+            shakeDetector?.stop()
+            shakeDetector = nil
+        } else if shakeDetector == nil {
+            let detector = ShakeDetector(source: makeShakeMotionSource(), onShake: { presentAfterShake() })
+            shakeDetector = detector
+            detector.start(active: UIApplication.shared.applicationState == .active)
+        }
+    }
+
+    /// Shows the reporting notification, requesting missing permission by default. No-op before configure.
+    /// Pass false to keep notification authorization under host control.
+    public static func showReportNotification(requestPermission: Bool = true) {
+        guard isConfigured else { return }
+        reportNotificationCleanup?.cancel()
+        reportNotificationCleanup = nil
+        if let controller = reportNotificationController {
+            controller.show(requestPermission: requestPermission)
+        } else {
+            configureReportNotification(true, requestPermission: requestPermission)
+        }
+    }
+
+    /// Hides the reporting notification until explicitly shown again. Keeps an open report intact.
+    public static func hideReportNotification() {
+        reportNotificationController?.hide()
+    }
+
+    /// Shows the floating control for this process, regardless of the initial option. No-op before configure.
+    public static func showFloatingButton() {
+        floatingControl?.show()
+    }
+
+    /// Hides the control for this process. An explicit recording stops and opens its report.
+    public static func hideFloatingButton() {
+        floatingControl?.hide()
+    }
+
+    /// Sets initial floating-control visibility. Showing it does not start recording or request capture consent.
+    public static func configure(
+        apiKey: String,
+        enableScreenshotDetection: Bool = true,
+        showFloatingButton: Bool,
+        startScreenRecordingImmediately: Bool = false,
+        screenRecordingOptions: ScreenRecordingOptions = .init(),
+        debug: Bool = false,
+        captureSystemLogs: Bool = false
+    ) {
+        configureInternal(apiKey: apiKey, enableScreenshotDetection: enableScreenshotDetection,
+                          debug: debug, captureSystemLogs: captureSystemLogs, wrapperSdk: nil,
+                          startScreenRecordingImmediately: startScreenRecordingImmediately, screenRecordingOptions: screenRecordingOptions,
+                          showFloatingButton: showFloatingButton)
+    }
+
+    /// Configures BugScreen. Logging, recording, shake detection and reporting controls default off.
+    /// Foreground shakes attach a best-effort app snapshot; NSMotionUsageDescription is required.
+    /// Notification permission is requested when notification reporting is enabled unless opted out.
+    /// Install and retain your notification-center delegate before configuring the SDK.
+    public static func configure(
+        apiKey: String,
+        enableScreenshotDetection: Bool = true,
+        enableShakeDetection: Bool = false,
+        debug: Bool = false,
+        captureSystemLogs: Bool = false,
+        showReportNotification: Bool = false,
+        requestNotificationPermission: Bool = true,
+        startScreenRecordingImmediately: Bool = false,
+        screenRecordingOptions: ScreenRecordingOptions = .init(),
+        showFloatingButton: Bool = false
+    ) {
+        configureInternal(apiKey: apiKey, enableScreenshotDetection: enableScreenshotDetection,
+                          debug: debug, captureSystemLogs: captureSystemLogs, wrapperSdk: nil,
+                          startScreenRecordingImmediately: startScreenRecordingImmediately, screenRecordingOptions: screenRecordingOptions,
+                          showFloatingButton: showFloatingButton, showReportNotification: showReportNotification,
+                          requestNotificationPermission: requestNotificationPermission,
+                          enableShakeDetection: enableShakeDetection)
+    }
 
     private static var runtimeConfigTask: Task<Result<ResolvedSdkConfig, Error>, Never>?
     private static var runtimeConfigLoader: (APIClient) async throws -> ResolvedSdkConfig = {
@@ -108,6 +231,29 @@ public enum BugScreenSDK {
         )
     }
 
+    /// Configures optional system-log attachments alongside custom logs.
+    ///
+    /// When enabled, submission attempts a snapshot of available unified logs from this process
+    /// and launch, covering at most five minutes since configuration. The file is limited to 1 MiB
+    /// and submission waits at most two seconds. OS privacy redactions are preserved, but host logs
+    /// may contain sensitive information. Capture is independent of `debug` and defaults off in
+    /// the existing configure overload. Other processes are excluded; plain stdout capture is not promised.
+    ///
+    /// - Parameters:
+    ///   - apiKey: Your API key from the BugScreen console.
+    ///   - enableScreenshotDetection: Whether to auto-detect screenshots (default: true).
+    ///   - debug: Whether to enable SDK debug diagnostics (default: false).
+    ///   - captureSystemLogs: Whether to attach available current-process system logs.
+    public static func configure(
+        apiKey: String,
+        enableScreenshotDetection: Bool = true,
+        debug: Bool = false,
+        captureSystemLogs: Bool
+    ) {
+        configureInternal(apiKey: apiKey, enableScreenshotDetection: enableScreenshotDetection,
+                          debug: debug, captureSystemLogs: captureSystemLogs, wrapperSdk: nil)
+    }
+
     /// SPI entry point for BugScreen's own cross-platform wrappers (React Native). `wrapperSdk` is a
     /// `<wrapper>/<semver>` tag (e.g. `rn/0.5.0`) emitted on the informational
     /// `X-BugScreen-SDK-Wrapper` request header (OPS-011). Not part of the public API — app
@@ -117,14 +263,43 @@ public enum BugScreenSDK {
     public static func configure(
         apiKey: String,
         enableScreenshotDetection: Bool = true,
+        enableShakeDetection: Bool = false,
         debug: Bool = false,
+        captureSystemLogs: Bool = false,
+        showReportNotification: Bool = false,
+        requestNotificationPermission: Bool = true,
+        startScreenRecordingImmediately: Bool = false,
+        screenRecordingOptions: ScreenRecordingOptions = .init(),
+        showFloatingButton: Bool = false,
         wrapperSdk: String?
+    ) {
+        configureInternal(apiKey: apiKey, enableScreenshotDetection: enableScreenshotDetection,
+                          debug: debug, captureSystemLogs: captureSystemLogs, wrapperSdk: wrapperSdk,
+                          startScreenRecordingImmediately: startScreenRecordingImmediately, screenRecordingOptions: screenRecordingOptions,
+                          showFloatingButton: showFloatingButton, showReportNotification: showReportNotification,
+                          requestNotificationPermission: requestNotificationPermission,
+                          enableShakeDetection: enableShakeDetection)
+    }
+
+    private static func configureInternal(
+        apiKey: String,
+        enableScreenshotDetection: Bool,
+        debug: Bool,
+        captureSystemLogs: Bool,
+        wrapperSdk: String?,
+        startScreenRecordingImmediately: Bool = false,
+        screenRecordingOptions: ScreenRecordingOptions = .init(),
+        showFloatingButton: Bool = false,
+        showReportNotification: Bool = false,
+        requestNotificationPermission: Bool = true,
+        enableShakeDetection: Bool = false
     ) {
         if configuration != nil {
             SDKLog.internalLog("♻️ BugScreenSDK: Reconfiguring (previous configuration torn down)", type: .info)
             tearDown()
         }
 
+        RecordingFileStore.initialize()
         SDKLog.setEnabled(debug)
 
         validateAPIKey(apiKey)
@@ -132,14 +307,34 @@ public enum BugScreenSDK {
         configuration = BugScreenConfiguration(
             apiKey: apiKey,
             enableScreenshotDetection: enableScreenshotDetection,
-            debug: debug
+            debug: debug,
+            captureSystemLogs: captureSystemLogs,
+            systemLogLifetime: SystemLogLifetime(),
+            screenRecordingOptions: screenRecordingOptions,
+            showReportNotification: showReportNotification,
+            requestNotificationPermission: requestNotificationPermission
         )
+        configuration?.enableShakeDetection = enableShakeDetection
 
         logger = Logger(enableConsoleLogging: debug)
+        if startScreenRecordingImmediately { startScreenRecording() }
 
         apiClient = APIClient(apiKey: apiKey, wrapperSdk: wrapperSdk)
 
         if let client = apiClient { loadRuntimeConfig(for: client) }
+        floatingControl = FloatingControlCoordinator(
+            initiallyVisible: showFloatingButton,
+            prepareReport: { prepareFloatingReport(video: $0) },
+            maximumDuration: { await loadFloatingVideoDuration() },
+            recording: {
+                if recordingController == nil { recordingController = ScreenRecordingController(options: screenRecordingOptions) }
+                return recordingController!
+            }
+        )
+
+        configureReportNotification(showReportNotification, requestPermission: requestNotificationPermission)
+
+        setShakeDetectionEnabled(enableShakeDetection)
 
         if enableScreenshotDetection {
             ScreenshotObserver.shared.startObserving()
@@ -149,6 +344,83 @@ public enum BugScreenSDK {
             "✅ BugScreenSDK: Configured successfully (screenshot detection: \(enableScreenshotDetection ? "enabled" : "disabled"))",
             type: .info
         )
+    }
+
+    private static func configureReportNotification(_ enabled: Bool, requestPermission: Bool = true) {
+        if enabled {
+            let controller = ReportNotificationController(
+                center: makeReportNotificationCenter(),
+                requestPermission: requestPermission,
+                startRecording: { window, finished in
+                    floatingControl?.startRecordingFromNotification(in: window, finished: finished) == true
+                },
+                present: { window, image in
+                    guard let root = window.rootViewController else {
+                        reportNotificationController?.reporterFinished()
+                        return
+                    }
+                    var presenter = root
+                    while let presented = presenter.presentedViewController {
+                        presenter = presented
+                    }
+                    presentBugReport(from: presenter, screenshot: image, autoAttach: false)
+                }
+            )
+            reportNotificationController = controller
+            controller.captureBusy(floatingControl?.busy == true)
+            if activeReporter != nil { controller.reporterStarted() }
+            Task { @MainActor [weak controller] in await controller?.start() }
+        } else {
+            let makeCenter = makeReportNotificationCenter
+            reportNotificationCleanup = Task { @MainActor in
+                guard !Task.isCancelled else { return }
+                let center = makeCenter()
+                let identifiers = await center.identifiers()
+                guard !Task.isCancelled, configuration?.showReportNotification == false else { return }
+                identifiers.filter(ReportNotificationDelegate.owns).forEach(center.remove)
+            }
+        }
+    }
+
+    static func loadFloatingVideoDuration() async -> Double? {
+        var result = await loadReporterConfiguration(forceRefresh: false)
+        if case .ready = result {} else { result = await loadReporterConfiguration(forceRefresh: true) }
+        guard case let .ready(config) = result, let limits = config.videoAttachmentLimits, limits.isValid else { return nil }
+        return limits.maxDurationSeconds
+    }
+
+    private static func prepareFloatingReport(video: Bool) -> FloatingReport {
+        let client = apiClient
+        let notification = reportNotificationController
+        notification?.captureBusy(true)
+        let submitter = DefaultBugReportSubmitter(client: client, capturedMetadata: DefaultBugReportSubmitter.currentMetadata())
+        if !video { recordingController?.reportWillOpen()?.cancel() }
+        return FloatingReport(present: { presenter, screenshot, source, notice, finished in
+            guard apiClient === client, activeReporter == nil else { finished(); return }
+            let hosting = makeBugReportController(submitter: submitter, screenshot: screenshot, autoAttach: false,
+                                                  automaticVideo: source, finished: finished)
+            activeReporter = hosting
+            presenter.present(hosting, animated: true) {
+                if let notice { FloatingNotice.show(notice, in: hosting.view) }
+            }
+        }, discard: {
+            submitter.discard()
+            notification?.captureBusy(false)
+            if apiClient === client, reportNotificationController !== notification { reportNotificationController?.captureBusy(false) }
+            if !video, apiClient === client { recordingController?.reportDidClose() }
+        })
+    }
+
+    static func presentAfterShake(window: UIWindow? = nil, active: Bool? = nil) {
+        guard configuration?.enableShakeDetection == true,
+              active ?? (UIApplication.shared.applicationState == .active),
+              activeReporter == nil, floatingControl?.busy != true,
+              let window = window ?? ReporterWindow.getKeyWindow(),
+              let root = window.rootViewController,
+              !ReporterWindow.isBugReportAlreadyPresented(from: root)
+        else { return }
+        let image = ReporterWindow.captureWindowSnapshot(window, maxDimension: 1440)
+        presentBugReport(from: ReporterWindow.getTopViewController(from: root), screenshot: image, autoAttach: false)
     }
 
     /// Logs a message to the SDK's circular buffer.
@@ -338,34 +610,76 @@ public enum BugScreenSDK {
         screenshot: UIImage?,
         autoAttach: Bool
     ) {
-        guard isConfigured else {
+        guard isConfigured, apiClient != nil else {
             SDKLog.internalLog("⚠️ BugScreenSDK: Cannot present bug report - SDK not configured", type: .error)
             return
         }
 
+        guard activeReporter == nil else { return }
+        guard floatingControl?.busy != true else {
+            reportNotificationController?.reporterFinished()
+            return
+        }
         let presenter = viewController ?? topViewController()
 
-        guard let presenter else {
+        guard let presenter, presenter.viewIfLoaded?.window != nil else {
+            reportNotificationController?.reporterFinished()
             SDKLog.internalLog("⚠️ BugScreenSDK: Cannot present bug report - no view controller available", type: .error)
             return
         }
 
+        guard !presenter.isBeingDismissed else {
+            reportNotificationController?.reporterFinished()
+            return
+        }
+        floatingControl?.reporterVisible(true)
+        let automaticVideo = recordingController?.reportWillOpen()
+
         // Everything the reporter needs from the SDK, in one value. The companion app
         // builds its own equivalent — same reporter, different host (RFC-003 §2).
-        let hostingController = BugReportHostingController(
-            host: ReporterHost(
-                submitter: DefaultBugReportSubmitter(),
-                showBranding: false,
-                configurationLoader: { forceRefresh in
-                    await loadReporterConfiguration(forceRefresh: forceRefresh)
-                }
-            ),
-            screenshots: screenshot.map { [$0] } ?? [],
-            autoAttach: autoAttach
-        )
+        let submitter = DefaultBugReportSubmitter()
+        let hostingController = makeBugReportController(submitter: submitter, screenshot: screenshot, autoAttach: autoAttach,
+                                                        automaticVideo: automaticVideo)
+        activeReporter = hostingController
         presenter.present(hostingController, animated: true)
 
         SDKLog.internalLog("✅ BugScreenSDK: Presented bug report UI", type: .info)
+    }
+
+    static func makeBugReportController(submitter: DefaultBugReportSubmitter, screenshot: UIImage?,
+                                        autoAttach: Bool, automaticVideo: AutomaticVideoSource? = nil,
+                                        finished: @escaping () -> Void = {}) -> BugReportHostingController
+    {
+        let reportClient = apiClient
+        let notificationController = reportNotificationController
+        notificationController?.reporterStarted()
+        shakeDetector?.reset()
+        return BugReportHostingController(
+            host: ReporterHost(
+                submitter: submitter,
+                showBranding: false,
+                configurationLoader: { forceRefresh in
+                    guard apiClient === reportClient else { return .unavailable }
+                    let result = await loadReporterConfiguration(forceRefresh: forceRefresh)
+                    return apiClient === reportClient ? result : .unavailable
+                }
+            ),
+            screenshots: screenshot.map { [$0] } ?? [],
+            autoAttach: autoAttach,
+            automaticVideo: automaticVideo,
+            onFinished: {
+                submitter.discard()
+                notificationController?.reporterFinished()
+                if notificationController !== reportNotificationController { reportNotificationController?.reporterFinished() }
+                if apiClient === reportClient {
+                    activeReporter = nil
+                    shakeDetector?.reset()
+                    recordingController?.reportDidClose()
+                    finished()
+                    floatingControl?.reporterVisible(false)
+                }
+            }
+        )
     }
 
     /// Shuts down the SDK and releases resources.
@@ -381,8 +695,19 @@ public enum BugScreenSDK {
     }
 
     private static func tearDown() {
+        floatingControl?.shutdown()
+        floatingControl = nil
+        reportNotificationCleanup?.cancel()
+        reportNotificationCleanup = nil
+        reportNotificationController?.stop()
+        reportNotificationController = nil
+        if let lifetime = configuration?.systemLogLifetime { SystemLogCapture.shared.invalidate(lifetime) }
+        recordingController?.shutdown()
+        recordingController = nil
         runtimeConfigTask?.cancel()
         runtimeConfigTask = nil
+        shakeDetector?.stop()
+        shakeDetector = nil
         ScreenshotObserver.shared.stopObserving()
         logger?.clear()
         logger = nil
@@ -407,16 +732,26 @@ public enum BugScreenSDK {
             apiKey: String,
             baseURL: URL,
             session: URLSession,
+            captureSystemLogs: Bool = false,
+            screenRecordingOptions: ScreenRecordingOptions = .init(),
+            floatingControl: FloatingControlCoordinator? = nil,
             runtimeConfigLoader: ((APIClient) async throws -> ResolvedSdkConfig)? = nil
         ) {
+            if let lifetime = configuration?.systemLogLifetime { SystemLogCapture.shared.invalidate(lifetime) }
             runtimeConfigTask?.cancel()
             runtimeConfigTask = nil
+            RecordingFileStore.initialize()
             SDKLog.setEnabled(false)
             configuration = BugScreenConfiguration(
                 apiKey: apiKey,
                 enableScreenshotDetection: false,
-                debug: false
+                debug: false,
+                captureSystemLogs: captureSystemLogs,
+                systemLogLifetime: SystemLogLifetime(),
+                screenRecordingOptions: screenRecordingOptions
             )
+            self.floatingControl?.shutdown()
+            self.floatingControl = floatingControl
             logger = Logger(enableConsoleLogging: false)
             let client = APIClient(apiKey: apiKey, baseURL: baseURL, session: session)
             apiClient = client
@@ -451,7 +786,7 @@ public enum BugScreenSDK {
                 return .success(runtimeConfig)
             } catch {
                 guard !Task.isCancelled else { return .failure(CancellationError()) }
-                SDKLog.internalLog("⚠️ BugScreenSDK: Config fetch failed: \(error)", type: .error)
+                SDKLog.internalLog("⚠️ BugScreenSDK: Config fetch failed", type: .error)
                 return .failure(error)
             }
         }

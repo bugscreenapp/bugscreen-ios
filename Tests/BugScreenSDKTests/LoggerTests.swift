@@ -3,6 +3,19 @@ import XCTest
 
 /// Tests for Logger circular buffer functionality.
 final class LoggerTests: XCTestCase {
+    func testOverlappingExportsOwnIndependentFiles() throws {
+        let logger = Logger()
+        logger.log("first export", level: .info)
+        let first = try XCTUnwrap(logger.exportToFile())
+        defer { try? FileManager.default.removeItem(at: first) }
+        logger.log("second export", level: .info)
+        let second = try XCTUnwrap(logger.exportToFile())
+        defer { try? FileManager.default.removeItem(at: second) }
+        XCTAssertNotEqual(first, second)
+        XCTAssertFalse(try String(contentsOf: first, encoding: .utf8).contains("second export"))
+        XCTAssertTrue(try String(contentsOf: second, encoding: .utf8).contains("second export"))
+    }
+
     var logger: Logger!
 
     override func setUp() {

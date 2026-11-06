@@ -115,7 +115,7 @@ final class ScreenshotObserver {
         }
 
         // 4. Find the key window and top-most view controller
-        guard let keyWindow = getKeyWindow() else {
+        guard let keyWindow = ReporterWindow.getKeyWindow() else {
             SDKLog.internalLog("No key window available", log: logger)
             return
         }
@@ -123,10 +123,10 @@ final class ScreenshotObserver {
             SDKLog.internalLog("No root view controller available", log: logger)
             return
         }
-        let topViewController = getTopViewController(from: rootViewController)
+        let topViewController = ReporterWindow.getTopViewController(from: rootViewController)
 
         // 5. Check if a bug report screen is already presented
-        if isBugReportAlreadyPresented(from: topViewController) {
+        if ReporterWindow.isBugReportAlreadyPresented(from: topViewController) {
             SDKLog.internalLog("Bug report UI already presented, skipping", log: logger, type: .debug)
             return
         }
@@ -134,7 +134,7 @@ final class ScreenshotObserver {
         // 6. Capture a key-window snapshot as the initial attachment. The Photos library may
         //    contain the real OS screenshot, but it's gated behind a permission prompt and may
         //    not be written yet — so we always have this fallback ready before presenting.
-        let fallbackImage = captureWindowSnapshot(keyWindow)
+        let fallbackImage = WindowSnapshot.capture(keyWindow)
         let snapshotSize = fallbackImage.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "nil"
         SDKLog.internalLog("Captured window snapshot: \(snapshotSize)", log: logger, type: .info)
 
@@ -146,69 +146,5 @@ final class ScreenshotObserver {
             screenshot: fallbackImage,
             autoAttach: true
         )
-    }
-
-    /// Renders the key window into a UIImage. Used as the immediate fallback attachment when
-    /// the Photos-library OS screenshot isn't accessible.
-    ///
-    /// SwiftUI-hosted windows often render blank when captured via `drawHierarchy(afterScreenUpdates: false)`
-    /// because SwiftUI defers commits to the layer tree. `CALayer.render(in:)` reads the current
-    /// presentation tree synchronously and is reliable across UIKit and SwiftUI windows.
-    @MainActor
-    private func captureWindowSnapshot(_ window: UIWindow) -> UIImage? {
-        guard window.bounds.width > 0, window.bounds.height > 0 else { return nil }
-        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
-        return renderer.image { ctx in
-            window.layer.render(in: ctx.cgContext)
-        }
-    }
-
-    /// Returns the active key window, or nil if no foreground scene has one.
-    @MainActor
-    private func getKeyWindow() -> UIWindow? {
-        guard let scene = UIApplication.shared.connectedScenes
-            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene
-        else {
-            return nil
-        }
-        return scene.windows.first(where: { $0.isKeyWindow })
-    }
-
-    /// Recursively finds the top-most presented view controller.
-    @MainActor
-    private func getTopViewController(from viewController: UIViewController) -> UIViewController {
-        if let presented = viewController.presentedViewController {
-            return getTopViewController(from: presented)
-        }
-
-        if let navigationController = viewController as? UINavigationController {
-            if let topViewController = navigationController.topViewController {
-                return getTopViewController(from: topViewController)
-            }
-        }
-
-        if let tabBarController = viewController as? UITabBarController {
-            if let selectedViewController = tabBarController.selectedViewController {
-                return getTopViewController(from: selectedViewController)
-            }
-        }
-
-        return viewController
-    }
-
-    /// Checks if a bug report UI is already presented.
-    @MainActor
-    private func isBugReportAlreadyPresented(from viewController: UIViewController) -> Bool {
-        // Check if the current view controller is the bug report hosting controller
-        if viewController is BugReportHostingController {
-            return true
-        }
-
-        // Check if any presented view controller is the bug report
-        if let presented = viewController.presentedViewController {
-            return isBugReportAlreadyPresented(from: presented)
-        }
-
-        return false
     }
 }

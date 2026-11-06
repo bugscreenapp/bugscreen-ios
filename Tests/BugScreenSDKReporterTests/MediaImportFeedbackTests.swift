@@ -8,6 +8,46 @@ import XCTest
 
 @MainActor
 final class MediaImportFeedbackTests: XCTestCase {
+    func testSharedMediaWaitsForConfigurationRetryThenUsesTheExistingMixedImportPipeline() async throws {
+        let preparer = ControlledVideoPreparer()
+        let source = try fixtureCopy()
+        let output = try fixtureCopy()
+        let unavailable = expectation(description: "Initial config failed")
+        var attempts = 0
+        var imports = 0
+        let model = BugReportViewModel(onDismiss: {}, submitter: FeedbackSubmitter(), videoPreparer: preparer,
+                                       configurationLoader: { _ in
+                                           attempts += 1
+                                           if attempts == 1 { unavailable.fulfill(); return .unavailable }
+                                           return .ready(ReporterConfiguration(showBranding: false, reportTypes: [],
+                                                                               videoAttachmentLimits: VideoAttachmentLimits(
+                                                                                   maxSizeBytes: 10_000_000,
+                                                                                   maxDurationSeconds: 60
+                                                                               )))
+                                       })
+        model.description = "Shared recording"
+        model.initialMediaCount = 2
+        model.initialMediaLoader = { imports += 1; return [.video(source), .image(TestHelpers.solidImage())] }
+        defer { model.cleanupVideos() }
+        XCTAssertEqual(imports, 0)
+        model.loadConfigurationIfNeeded()
+        await fulfillment(of: [unavailable], timeout: 2)
+        XCTAssertEqual(imports, 0)
+        model.retryConfiguration()
+        await fulfillment(of: [preparer.exportStarted], timeout: 2)
+        XCTAssertEqual(imports, 1)
+        XCTAssertFalse(model.canSubmit)
+        let completed = expectation(description: "Shared import completed")
+        let subscription = model.$isPreparingMedia.dropFirst().filter { !$0 }.sink { _ in completed.fulfill() }
+        preparer.finish(.success(PreparedVideo(file: output, poster: preparer.poster, durationSeconds: 1)))
+        await fulfillment(of: [completed], timeout: 2)
+        withExtendedLifetime(subscription) {}
+        XCTAssertEqual(model.screenshots.count, 2)
+        XCTAssertNotNil(model.videos[0])
+        XCTAssertTrue(model.canSubmit)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+    }
+
     func testPickerDelegateReservesEveryCardBeforeProvidersFinishLoading() async throws {
         let model = makeModel()
         model.description = "Playback stutters"

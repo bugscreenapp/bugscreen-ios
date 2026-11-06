@@ -34,7 +34,7 @@ enum MarkupRenderer {
     }
 
     /// Replays `marks` (image-pixel coordinates) onto a copy of `image`.
-    /// Redaction is destructive by construction: blur rects copy in pixelated
+    /// Redaction is destructive by construction: blur strokes copy in pixelated
     /// pixels, solid rects overwrite with an opaque fill.
     static func flatten(image: UIImage, marks: [MarkupMark], pixelated: UIImage) -> UIImage {
         let pixelSize = pixelSize(of: image)
@@ -95,17 +95,17 @@ enum MarkupRenderer {
                     cg.addLine(to: point)
                 }
             }
-        case let .redact(rect, style):
-            switch style {
-            case .solid:
-                cg.setFillColor(uiColor(redactSolidColor).cgColor)
-                cg.fill(rect)
-            case .blur:
-                cg.saveGState()
-                cg.clip(to: rect)
-                pixelated.draw(in: CGRect(origin: .zero, size: pixelSize))
-                cg.restoreGState()
-            }
+        case let .blur(points, strokeWidthPx):
+            cg.saveGState()
+            cg.setShouldAntialias(false)
+            cg.clip(to: CGRect(origin: .zero, size: pixelSize))
+            cg.addPath(blurStrokePath(points: points, strokeWidthPx: strokeWidthPx))
+            cg.clip()
+            pixelated.draw(in: CGRect(origin: .zero, size: pixelSize), blendMode: .copy, alpha: 1)
+            cg.restoreGState()
+        case let .solidRedact(rect):
+            cg.setFillColor(uiColor(redactSolidColor).cgColor)
+            cg.fill(rect)
         }
     }
 

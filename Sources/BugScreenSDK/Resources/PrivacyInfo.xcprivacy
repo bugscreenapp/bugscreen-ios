@@ -7,8 +7,11 @@
   for App Store submission. Required for iOS 17+ apps.
 
   Key Points:
-  - SDK does NOT collect data automatically
-  - Data is only collected when the user explicitly submits a bug report
+  - Diagnostic evidence is sent only when the user explicitly submits a bug report
+  - System-log snapshots require developer opt-in and read only the current process
+  - Optional, explicitly enabled screen recording keeps a bounded silent buffer locally while the host app is foregrounded
+  - Recording requires OS consent; the tester can review or remove its clip before submitting
+  - Report data is transmitted only when the user explicitly submits a bug report
   - All collected data is used solely for app functionality (issue triage)
   - No tracking, no linking to identity, no third-party data sharing
   - Uses system boot time API for log timestamps
@@ -47,7 +50,8 @@
 		  disclosure that the SDK collects nothing device-identifying. See CAP-005.
 		-->
 
-		<!-- Device model, OS version, app version, memory, locale, appearance, SDK version, in-memory log buffer -->
+		<!-- Device/app metadata, custom log buffer, and optional current-process unified-log snapshot.
+		     System logs preserve OS redactions; developers must avoid sensitive host-log content. -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
@@ -61,7 +65,7 @@
 			</array>
 		</dict>
 
-		<!-- User-attached screenshot (only on explicit submit) -->
+		<!-- Screenshots, user-selected videos and optional silent recent-screen clips (sent only on explicit submit) -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypePhotosorVideos</string>
